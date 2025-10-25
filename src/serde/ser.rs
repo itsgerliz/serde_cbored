@@ -222,7 +222,7 @@ impl<W: Write> Serializer for &mut Encoder<W> {
     where
         T: ?Sized + Serialize,
     {
-        todo!()
+        value.serialize(self)
     }
 
     fn serialize_unit(self) -> Result<Self::Ok, Self::Error> {
