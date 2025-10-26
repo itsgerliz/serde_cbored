@@ -263,7 +263,9 @@ impl<W: Write> Serializer for &mut Encoder<W> {
     where
         T: ?Sized + Serialize,
     {
-        todo!()
+        variant_index.serialize(&mut *self)?;
+        value.serialize(&mut *self)?;
+        Ok(())
     }
 
     fn serialize_seq(self, len: Option<usize>) -> Result<Self::SerializeSeq, Self::Error> {
