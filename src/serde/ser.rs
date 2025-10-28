@@ -1,10 +1,18 @@
 use crate::error::EncodeError;
-use serde::ser::{Impossible, Serialize, Serializer};
+use serde::ser::{Serialize, Serializer};
 use std::io::{BufWriter, Write};
 
 pub struct Encoder<W: Write> {
     writer: BufWriter<W>,
 }
+
+pub struct SeqEncoder;
+pub struct TupleEncoder;
+pub struct TupleStructEncoder;
+pub struct TupleVariantEncoder;
+pub struct MapEncoder;
+pub struct StructEncoder;
+pub struct StructVariantEncoder;
 
 impl<W: Write> Encoder<W> {
     pub fn into_writer(destination: W) -> Self {
@@ -22,13 +30,13 @@ impl<W: Write> Serializer for &mut Encoder<W> {
     type Ok = ();
     type Error = EncodeError;
 
-    type SerializeSeq = Impossible<Self::Ok, Self::Error>;
-    type SerializeTuple = Impossible<Self::Ok, Self::Error>;
-    type SerializeTupleStruct = Impossible<Self::Ok, Self::Error>;
-    type SerializeTupleVariant = Impossible<Self::Ok, Self::Error>;
-    type SerializeMap = Impossible<Self::Ok, Self::Error>;
-    type SerializeStruct = Impossible<Self::Ok, Self::Error>;
-    type SerializeStructVariant = Impossible<Self::Ok, Self::Error>;
+    type SerializeSeq = SeqEncoder;
+    type SerializeTuple = TupleEncoder;
+    type SerializeTupleStruct = TupleStructEncoder;
+    type SerializeTupleVariant = TupleVariantEncoder;
+    type SerializeMap = MapEncoder;
+    type SerializeStruct = StructEncoder;
+    type SerializeStructVariant = StructVariantEncoder;
 
     fn serialize_bool(self, v: bool) -> Result<Self::Ok, Self::Error> {
         let byte: u8 = if v { 0xF5 } else { 0xF4 };
