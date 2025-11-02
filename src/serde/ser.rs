@@ -1,18 +1,38 @@
 use crate::error::EncodeError;
-use serde::ser::{Serialize, Serializer};
+use serde::ser::{Serialize, SerializeMap, SerializeSeq, SerializeStruct, SerializeStructVariant, SerializeTuple, SerializeTupleStruct, SerializeTupleVariant, Serializer};
 use std::io::{BufWriter, Write};
 
 pub struct Encoder<W: Write> {
     writer: BufWriter<W>,
 }
 
-pub struct SeqEncoder;
-pub struct TupleEncoder;
-pub struct TupleStructEncoder;
-pub struct TupleVariantEncoder;
-pub struct MapEncoder;
-pub struct StructEncoder;
-pub struct StructVariantEncoder;
+pub struct SeqEncoder<'a, W: Write> {
+    encoder: &'a mut Encoder<W>
+}
+
+pub struct TupleEncoder<'a, W: Write> {
+    encoder: &'a mut Encoder<W>
+}
+
+pub struct TupleStructEncoder<'a, W: Write> {
+    encoder: &'a mut Encoder<W>
+}
+
+pub struct TupleVariantEncoder<'a, W: Write> {
+    encoder: &'a mut Encoder<W>
+}
+
+pub struct MapEncoder<'a, W: Write> {
+    encoder: &'a mut Encoder<W>
+}
+
+pub struct StructEncoder<'a, W: Write> {
+    encoder: &'a mut Encoder<W>
+}
+
+pub struct StructVariantEncoder<'a, W: Write> {
+    encoder: &'a mut Encoder<W>
+}
 
 impl<W: Write> Encoder<W> {
     pub fn into_writer(destination: W) -> Self {
@@ -26,17 +46,17 @@ impl<W: Write> Encoder<W> {
     }
 }
 
-impl<W: Write> Serializer for &mut Encoder<W> {
+impl<'a, W: Write> Serializer for &'a mut Encoder<W> {
     type Ok = ();
     type Error = EncodeError;
 
-    type SerializeSeq = SeqEncoder;
-    type SerializeTuple = TupleEncoder;
-    type SerializeTupleStruct = TupleStructEncoder;
-    type SerializeTupleVariant = TupleVariantEncoder;
-    type SerializeMap = MapEncoder;
-    type SerializeStruct = StructEncoder;
-    type SerializeStructVariant = StructVariantEncoder;
+    type SerializeSeq = SeqEncoder<'a, W>;
+    type SerializeTuple = TupleEncoder<'a, W>;
+    type SerializeTupleStruct = TupleStructEncoder<'a, W>;
+    type SerializeTupleVariant = TupleVariantEncoder<'a, W>;
+    type SerializeMap = MapEncoder<'a, W>;
+    type SerializeStruct = StructEncoder<'a, W>;
+    type SerializeStructVariant = StructVariantEncoder<'a, W>;
 
     fn serialize_bool(self, v: bool) -> Result<Self::Ok, Self::Error> {
         let byte: u8 = if v { 0xF5 } else { 0xF4 };
@@ -321,6 +341,117 @@ impl<W: Write> Serializer for &mut Encoder<W> {
         variant: &'static str,
         len: usize,
     ) -> Result<Self::SerializeStructVariant, Self::Error> {
+        todo!()
+    }
+}
+
+impl<'a, W: Write> SerializeSeq for SeqEncoder<'a, W> {
+    type Ok = ();
+    type Error = EncodeError;
+
+    fn serialize_element<T>(&mut self, value: &T) -> Result<(), Self::Error>
+    where
+        T: ?Sized + Serialize {
+        todo!()
+    }
+
+    fn end(self) -> Result<Self::Ok, Self::Error> {
+        todo!()
+    }
+}
+
+impl<'a, W: Write> SerializeTuple for TupleEncoder<'a, W> {
+    type Ok = ();
+    type Error = EncodeError;
+
+    fn serialize_element<T>(&mut self, value: &T) -> Result<(), Self::Error>
+    where
+        T: ?Sized + Serialize {
+        todo!()
+    }
+
+    fn end(self) -> Result<Self::Ok, Self::Error> {
+        todo!()
+    }
+}
+
+impl<'a, W: Write> SerializeTupleStruct for TupleStructEncoder<'a, W> {
+    type Ok = ();
+    type Error = EncodeError;
+
+    fn serialize_field<T>(&mut self, value: &T) -> Result<(), Self::Error>
+    where
+        T: ?Sized + Serialize {
+        todo!()
+    }
+
+    fn end(self) -> Result<Self::Ok, Self::Error> {
+        todo!()
+    }
+}
+
+impl<'a, W: Write> SerializeTupleVariant for TupleVariantEncoder<'a, W> {
+    type Ok = ();
+    type Error = EncodeError;
+
+    fn serialize_field<T>(&mut self, value: &T) -> Result<(), Self::Error>
+    where
+        T: ?Sized + Serialize {
+        todo!()
+    }
+
+    fn end(self) -> Result<Self::Ok, Self::Error> {
+        todo!()
+    }
+}
+
+impl<'a, W: Write> SerializeMap for MapEncoder<'a, W> {
+    type Ok = ();
+    type Error = EncodeError;
+
+    fn serialize_key<T>(&mut self, key: &T) -> Result<(), Self::Error>
+    where
+        T: ?Sized + Serialize {
+        todo!()
+    }
+
+    fn serialize_value<T>(&mut self, value: &T) -> Result<(), Self::Error>
+    where
+        T: ?Sized + Serialize {
+        todo!()
+    }
+
+    fn end(self) -> Result<Self::Ok, Self::Error> {
+        todo!()
+    }
+}
+
+impl<'a, W: Write> SerializeStruct for StructEncoder<'a, W> {
+    type Ok = ();
+    type Error = EncodeError;
+
+    fn serialize_field<T>(&mut self, key: &'static str, value: &T) -> Result<(), Self::Error>
+    where
+        T: ?Sized + Serialize {
+        todo!()
+    }
+
+    fn end(self) -> Result<Self::Ok, Self::Error> {
+        todo!()
+    }
+}
+
+impl<'a, W: Write> SerializeStructVariant for StructVariantEncoder<'a, W> {
+    type Ok = ();
+    type Error = EncodeError;
+
+    fn serialize_field<T>(&mut self, key: &'static str, value: &T) -> Result<(), Self::Error>
+    where
+        T: ?Sized + Serialize {
+        todo!()
+    }
+
+    fn end(self) -> Result<Self::Ok, Self::Error> {
         todo!()
     }
 }
