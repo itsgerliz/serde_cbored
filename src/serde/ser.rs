@@ -1,6 +1,6 @@
 //! The CBOR encoder
 
-use crate::error::EncodeError;
+use crate::{error::EncodeError, serde::common::NEGATIVE_INTEGER};
 use serde::ser::{
     Serialize, SerializeMap, SerializeSeq, SerializeStruct, SerializeStructVariant, SerializeTuple,
     SerializeTupleStruct, SerializeTupleVariant, Serializer,
@@ -84,43 +84,45 @@ impl<'a, W: Write> Serializer for &'a mut Encoder<W> {
     type SerializeStructVariant = StructVariantEncoder<'a, W>;
 
     fn serialize_bool(self, v: bool) -> Result<Self::Ok, Self::Error> {
+        // Here 0xF5 and 0xF4 represent true and false, respectively
         let byte: u8 = if v { 0xF5 } else { 0xF4 };
+
         Ok(self.writer.write_all(&[byte])?)
     }
 
     fn serialize_i8(self, v: i8) -> Result<Self::Ok, Self::Error> {
         if v < 0 {
-            // Signed (-128..=-1)
+            // Signed branch
             let encoded_value: u8 = (-1 - v) as u8;
             if encoded_value < 24 {
-                Ok(self.writer.write_all(&[(0b001_00000 | encoded_value)])?)
+                // Does it fit in additional information?
+                Ok(self.writer.write_all(&[NEGATIVE_INTEGER | encoded_value])?)
             } else {
+                // Here 0x38 represents a negative integer, stored in the next byte
                 Ok(self.writer.write_all(&[0x38, encoded_value])?)
             }
         } else {
-            // Unsigned (0..=127)
+            // Unsigned branch, forward to serialize_u8
             self.serialize_u8(v as u8)
         }
     }
 
     fn serialize_i16(self, v: i16) -> Result<Self::Ok, Self::Error> {
         if v < 0 {
-            // Signed (-32_768..=-1)
-            let encoded_value: u16 = (-1 - v) as u16;
-            if encoded_value < 24 {
-                Ok(self
-                    .writer
-                    .write_all(&[(0b001_00000 | (encoded_value as u8))])?)
+            // Signed branch
+            if v >= i8::MIN as i16 {
+                // Can this i16 fit in a i8?, if it can, forward to serialize_i8
+                self.serialize_i8(v as i8)
             } else {
-                let encoded_value_bigend: [u8; 2] = encoded_value.to_be_bytes();
-                Ok(self.writer.write_all(&[
-                    0x39,
-                    encoded_value_bigend[0],
-                    encoded_value_bigend[1],
-                ])?)
+                let encoded_value: u16 = (-1 - v) as u16;
+                // Here 0x39 represents a negative integer, stored in the next two bytes
+                self.writer.write_all(&[0x39])?;
+                self.writer.write_all(&encoded_value.to_be_bytes())?;
+
+                Ok(())
             }
         } else {
-            // Unsigned (0..=32_767)
+            // Unsigned branch, forward to serialize_u16
             self.serialize_u16(v as u16)
         }
     }
