@@ -129,24 +129,20 @@ impl<'a, W: Write> Serializer for &'a mut Encoder<W> {
 
     fn serialize_i32(self, v: i32) -> Result<Self::Ok, Self::Error> {
         if v < 0 {
-            // Signed (-2_147_483_648..=-1)
-            let encoded_value: u32 = (-1 - v) as u32;
-            if encoded_value < 24 {
-                Ok(self
-                    .writer
-                    .write_all(&[(0b001_00000 | (encoded_value as u8))])?)
+            // Signed branch
+            if v >= i16::MIN as i32 {
+                // Can this i32 fit in a i16?, if it can, forward to serialize_i16
+                self.serialize_i16(v as i16)
             } else {
-                let encoded_value_bigend: [u8; 4] = encoded_value.to_be_bytes();
-                Ok(self.writer.write_all(&[
-                    0x3A,
-                    encoded_value_bigend[0],
-                    encoded_value_bigend[1],
-                    encoded_value_bigend[2],
-                    encoded_value_bigend[3],
-                ])?)
+                let encoded_value: u32 = (-1 - v) as u32;
+                // Here 0x3A represents a negative integer, stored in the next four bytes
+                self.writer.write_all(&[0x3A])?;
+                self.writer.write_all(&encoded_value.to_be_bytes())?;
+
+                Ok(())
             }
         } else {
-            // Unsigned (0..=2_147_483_647)
+            // Unsigned branch, forward to serialize_u32
             self.serialize_u32(v as u32)
         }
     }
