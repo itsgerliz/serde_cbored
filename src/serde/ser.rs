@@ -1,6 +1,6 @@
 //! The CBOR encoder
 
-use crate::{error::EncodeError, serde::common::NEGATIVE_INTEGER};
+use crate::{error::EncodeError, serde::common::{NEGATIVE_INTEGER, UNSIGNED_INTEGER}};
 use serde::ser::{
     Serialize, SerializeMap, SerializeSeq, SerializeStruct, SerializeStructVariant, SerializeTuple,
     SerializeTupleStruct, SerializeTupleVariant, Serializer,
@@ -169,8 +169,10 @@ impl<'a, W: Write> Serializer for &'a mut Encoder<W> {
 
     fn serialize_u8(self, v: u8) -> Result<Self::Ok, Self::Error> {
         if v < 24 {
-            Ok(self.writer.write_all(&[(0b000_00000 | v)])?)
+            // Does it fit in additional information?
+            Ok(self.writer.write_all(&[UNSIGNED_INTEGER | v])?)
         } else {
+            // Here 0x18 represents an unsigned integer, stored in the next byte
             Ok(self.writer.write_all(&[0x18, v])?)
         }
     }
