@@ -239,48 +239,49 @@ impl<'a, W: Write> Serializer for &'a mut Encoder<W> {
     }
 
     fn serialize_str(self, v: &str) -> Result<Self::Ok, Self::Error> {
-        let v_len = v.len();
-        if v_len < 24 {
-            self.writer.write_all(&[(0b011_00000 | (v_len as u8))])?;
+        let string_len = v.len();
+
+        if string_len < 24 {
+            // Does the string length fit in additional information?
+            self.writer.write_all(&[TEXT_STRING | (string_len as u8)])?;
             self.writer.write_all(v.as_bytes())?;
+
             Ok(())
-        } else if v_len <= (u8::MAX as usize) {
-            self.writer.write_all(&[0x78, (v_len as u8)])?;
+        } else if string_len <= u8::MAX as usize {
+            // Does the string length fit in a single byte?
+            // Here 0x78 represents a text string, whose length is stored in the next byte
+            self.writer.write_all(&[0x78, (string_len as u8)])?;
             self.writer.write_all(v.as_bytes())?;
+
             Ok(())
-        } else if v_len <= (u16::MAX as usize) {
-            let encoded_value_bigend: [u8; 2] = (v_len as u16).to_be_bytes();
-            self.writer
-                .write_all(&[0x79, encoded_value_bigend[0], encoded_value_bigend[1]])?;
+        } else if string_len <= u16::MAX as usize {
+            // Does the string length fit in two bytes?
+            // Here 0x79 represents a text string, whose length is stored in the next two bytes
+            self.writer.write_all(&[0x79])?;
+            self.writer.write_all(&(string_len as u16).to_be_bytes())?;
             self.writer.write_all(v.as_bytes())?;
+
             Ok(())
-        } else if v_len <= (u32::MAX as usize) {
-            let encoded_value_bigend: [u8; 4] = (v_len as u32).to_be_bytes();
-            self.writer.write_all(&[
-                0x7A,
-                encoded_value_bigend[0],
-                encoded_value_bigend[1],
-                encoded_value_bigend[2],
-                encoded_value_bigend[3],
-            ])?;
+
+        } else if string_len <= u32::MAX as usize {
+            // Does the string length fit in four bytes?
+            // Here 0x7A represents a text string, whose length is stored in the next four bytes
+            self.writer.write_all(&[0x7A])?;
+            self.writer.write_all(&(string_len as u32).to_be_bytes())?;
             self.writer.write_all(v.as_bytes())?;
+
             Ok(())
-        } else if v_len <= (u64::MAX as usize) {
-            let encoded_value_bigend: [u8; 8] = (v_len as u64).to_be_bytes();
-            self.writer.write_all(&[
-                0x7B,
-                encoded_value_bigend[0],
-                encoded_value_bigend[1],
-                encoded_value_bigend[2],
-                encoded_value_bigend[3],
-                encoded_value_bigend[4],
-                encoded_value_bigend[5],
-                encoded_value_bigend[6],
-                encoded_value_bigend[7],
-            ])?;
+        } else if string_len <= u64::MAX as usize {
+            // Does the string length fit in eight bytes?
+            // Here 0x7B represents a text string, whose length is stored in the next eight bytes
+            self.writer.write_all(&[0x7B])?;
+            self.writer.write_all(&(string_len as u64).to_be_bytes())?;
             self.writer.write_all(v.as_bytes())?;
+
             Ok(())
         } else {
+            // The CBOR RFC which this codec is based on does not support text strings longer than
+            // 2^64 bytes long, this block is here just for compliance with the RFC
             Err(EncodeError::TextStringTooLong)
         }
     }
