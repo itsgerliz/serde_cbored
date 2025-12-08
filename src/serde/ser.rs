@@ -1,6 +1,6 @@
 //! The CBOR encoder
 
-use crate::{error::EncodeError, serde::common::{NEGATIVE_INTEGER, TEXT_STRING, UNSIGNED_INTEGER}};
+use crate::{error::EncodeError, serde::common::{BYTE_STRING, NEGATIVE_INTEGER, TEXT_STRING, UNSIGNED_INTEGER}};
 use serde::ser::{
     Serialize, SerializeMap, SerializeSeq, SerializeStruct, SerializeStructVariant, SerializeTuple,
     SerializeTupleStruct, SerializeTupleVariant, Serializer,
@@ -287,48 +287,48 @@ impl<'a, W: Write> Serializer for &'a mut Encoder<W> {
     }
 
     fn serialize_bytes(self, v: &[u8]) -> Result<Self::Ok, Self::Error> {
-        let v_len = v.len();
-        if v_len < 24 {
-            self.writer.write_all(&[(0b010_00000 | (v_len as u8))])?;
+        let bytestring_len = v.len();
+
+        if bytestring_len < 24 {
+            // Does the byte string length fit in additional information?
+            self.writer.write_all(&[BYTE_STRING | (bytestring_len as u8)])?;
             self.writer.write_all(v)?;
+
             Ok(())
-        } else if v_len <= (u8::MAX as usize) {
-            self.writer.write_all(&[0x58, (v_len as u8)])?;
+        } else if bytestring_len <= u8::MAX as usize {
+            // Does the byte string length fit in a single byte?
+            // Here 0x58 represents a byte string, whose length is stored in the next byte
+            self.writer.write_all(&[0x58, (bytestring_len as u8)])?;
             self.writer.write_all(v)?;
+
             Ok(())
-        } else if v_len <= (u16::MAX as usize) {
-            let encoded_value_bigend: [u8; 2] = (v_len as u16).to_be_bytes();
-            self.writer
-                .write_all(&[0x59, encoded_value_bigend[0], encoded_value_bigend[1]])?;
+        } else if bytestring_len <= u16::MAX as usize {
+            // Does the byte string length fit in two bytes?
+            // Here 0x59 represents a byte string, whose length is stored in the next two bytes
+            self.writer.write_all(&[0x59])?;
+            self.writer.write_all(&(bytestring_len as u16).to_be_bytes())?;
             self.writer.write_all(v)?;
+
             Ok(())
-        } else if v_len <= (u32::MAX as usize) {
-            let encoded_value_bigend: [u8; 4] = (v_len as u32).to_be_bytes();
-            self.writer.write_all(&[
-                0x5A,
-                encoded_value_bigend[0],
-                encoded_value_bigend[1],
-                encoded_value_bigend[2],
-                encoded_value_bigend[3],
-            ])?;
+        } else if bytestring_len <= u32::MAX as usize {
+            // Does the byte string length fit in four bytes?
+            // Here 0x5A represents a byte string, whose length is stored in the next four bytes
+            self.writer.write_all(&[0x5A])?;
+            self.writer.write_all(&(bytestring_len as u32).to_be_bytes())?;
             self.writer.write_all(v)?;
+
             Ok(())
-        } else if v_len <= (u64::MAX as usize) {
-            let encoded_value_bigend: [u8; 8] = (v_len as u64).to_be_bytes();
-            self.writer.write_all(&[
-                0x5B,
-                encoded_value_bigend[0],
-                encoded_value_bigend[1],
-                encoded_value_bigend[2],
-                encoded_value_bigend[3],
-                encoded_value_bigend[4],
-                encoded_value_bigend[5],
-                encoded_value_bigend[6],
-                encoded_value_bigend[7],
-            ])?;
+        } else if bytestring_len <= u64::MAX as usize {
+            // Does the byte string length fit in eight bytes?
+            // Here 0x5B represents a byte string, whose length is stored in the next eight bytes
+            self.writer.write_all(&[0x5B])?;
+            self.writer.write_all(&(bytestring_len as u64).to_be_bytes())?;
             self.writer.write_all(v)?;
+
             Ok(())
         } else {
+            // The CBOR RFC which this codec is based on does not support byte strings longer than
+            // 2^64 bytes long, this block is here just for compliance with the RFC
             Err(EncodeError::ByteStringTooLong)
         }
     }
