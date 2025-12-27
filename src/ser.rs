@@ -10,55 +10,30 @@ use std::io::{BufWriter, Write};
 /// The encoder type, contains an inner writer where the encoded CBOR data will be written
 /// # Considerations
 /// - The inner writer is buffered
-pub struct Encoder<W: Write> {
+struct Encoder<W: Write> {
     writer: BufWriter<W>,
 }
 
-/// The sequence encoder helper type, contains the main encoder type
-pub struct SeqEncoder<'a, W: Write> {
+struct ComplexEncoder<'a, W: Write> {
     encoder: &'a mut Encoder<W>,
+    indefinite_length: bool,
+    kind: ComplexKind,
 }
 
-/// The tuple encoder helper type, contains the main encoder type
-pub struct TupleEncoder<'a, W: Write> {
-    encoder: &'a mut Encoder<W>,
-}
-
-/// The tuple struct encoder helper type, contains the main encoder type
-pub struct TupleStructEncoder<'a, W: Write> {
-    encoder: &'a mut Encoder<W>,
-}
-
-/// The tuple variant encoder helper type, contains the main encoder type
-pub struct TupleVariantEncoder<'a, W: Write> {
-    encoder: &'a mut Encoder<W>,
-}
-
-/// The map encoder helper type, contains the main encoder type
-pub struct MapEncoder<'a, W: Write> {
-    encoder: &'a mut Encoder<W>,
-}
-
-/// The struct encoder helper type, contains the main encoder type
-pub struct StructEncoder<'a, W: Write> {
-    encoder: &'a mut Encoder<W>,
-}
-
-/// The struct variant encoder helper type, contains the main encoder type
-pub struct StructVariantEncoder<'a, W: Write> {
-    encoder: &'a mut Encoder<W>,
+enum ComplexKind {
+    Array,
+    Map,
 }
 
 impl<W: Write> Encoder<W> {
     /// Construct a new encoder, which will write its output into `W`
-    pub fn into_writer(destination: W) -> Self {
+    pub fn new(destination: W) -> Self {
         Self {
             writer: BufWriter::new(destination),
         }
     }
 
-    /// As you can see in the Considerations section on this type,
-    /// the [Encoder]'s inner writer is buffered, this means that while you
+    /// The [Encoder]'s inner writer is buffered, this means that while you
     /// might have finished encoding data, this inner buffer could have CBOR data
     /// pending to be written to its writer, this method tries to flush this buffer,
     /// ensuring all pending data is written to its writer
@@ -75,16 +50,16 @@ impl<'a, W: Write> Serializer for &'a mut Encoder<W> {
     type Ok = ();
     type Error = EncodeError;
 
-    type SerializeSeq = SeqEncoder<'a, W>;
-    type SerializeTuple = TupleEncoder<'a, W>;
-    type SerializeTupleStruct = TupleStructEncoder<'a, W>;
-    type SerializeTupleVariant = TupleVariantEncoder<'a, W>;
-    type SerializeMap = MapEncoder<'a, W>;
-    type SerializeStruct = StructEncoder<'a, W>;
-    type SerializeStructVariant = StructVariantEncoder<'a, W>;
+    type SerializeSeq = ComplexEncoder<'a, W>;
+    type SerializeTuple = ComplexEncoder<'a, W>;
+    type SerializeTupleStruct = ComplexEncoder<'a, W>;
+    type SerializeTupleVariant = ComplexEncoder<'a, W>;
+    type SerializeMap = ComplexEncoder<'a, W>;
+    type SerializeStruct = ComplexEncoder<'a, W>;
+    type SerializeStructVariant = ComplexEncoder<'a, W>;
 
     fn serialize_bool(self, v: bool) -> Result<Self::Ok, Self::Error> {
-        // Here 0xF5 and 0xF4 represent true and false, respectively
+        // 0xF5 = true | 0xF4 = false
         let byte: u8 = if v { 0xF5 } else { 0xF4 };
 
         Ok(self.writer.write_all(&[byte])?)
@@ -92,97 +67,83 @@ impl<'a, W: Write> Serializer for &'a mut Encoder<W> {
 
     fn serialize_i8(self, v: i8) -> Result<Self::Ok, Self::Error> {
         if v < 0 {
-            // Signed branch
             let encoded_value: u8 = (-1 - v) as u8;
             if encoded_value < 24 {
-                // Does it fit in additional information?
                 Ok(self.writer.write_all(&[NEGATIVE_INTEGER | encoded_value])?)
             } else {
-                // Here 0x38 represents a negative integer, stored in the next byte
+                // 0x38 = negative integer in the next byte
                 Ok(self.writer.write_all(&[0x38, encoded_value])?)
             }
         } else {
-            // Unsigned branch, forward to serialize_u8
             self.serialize_u8(v as u8)
         }
     }
 
     fn serialize_i16(self, v: i16) -> Result<Self::Ok, Self::Error> {
         if v < 0 {
-            // Signed branch
             if v >= i8::MIN as i16 {
-                // Can this i16 fit in a i8?, if it can, forward to serialize_i8
                 self.serialize_i8(v as i8)
             } else {
                 let encoded_value: u16 = (-1 - v) as u16;
-                // Here 0x39 represents a negative integer, stored in the next two bytes
+                // 0x39 = negative integer in the next two bytes
                 self.writer.write_all(&[0x39])?;
                 self.writer.write_all(&encoded_value.to_be_bytes())?;
 
                 Ok(())
             }
         } else {
-            // Unsigned branch, forward to serialize_u16
             self.serialize_u16(v as u16)
         }
     }
 
     fn serialize_i32(self, v: i32) -> Result<Self::Ok, Self::Error> {
         if v < 0 {
-            // Signed branch
             if v >= i16::MIN as i32 {
-                // Can this i32 fit in a i16?, if it can, forward to serialize_i16
                 self.serialize_i16(v as i16)
             } else {
                 let encoded_value: u32 = (-1 - v) as u32;
-                // Here 0x3A represents a negative integer, stored in the next four bytes
+                // 0x3A = negative integer in the next four bytes
                 self.writer.write_all(&[0x3A])?;
                 self.writer.write_all(&encoded_value.to_be_bytes())?;
 
                 Ok(())
             }
         } else {
-            // Unsigned branch, forward to serialize_u32
             self.serialize_u32(v as u32)
         }
     }
 
     fn serialize_i64(self, v: i64) -> Result<Self::Ok, Self::Error> {
         if v < 0 {
-            // Signed branch
             if v >= i32::MIN as i64 {
-                // Can this i64 fit in a i32?, if it can, forward to serialize_i32
                 self.serialize_i32(v as i32)
             } else {
                 let encoded_value: u64 = (-1 - v) as u64;
-                // Here 0x3B represents a negative integer, stored in the next eight bytes
+                // 0x3B = negative integer in the next eight bytes
                 self.writer.write_all(&[0x3B])?;
                 self.writer.write_all(&encoded_value.to_be_bytes())?;
 
                 Ok(())
             }
         } else {
-            // Unsigned branch, forward to serialize_u64
             self.serialize_u64(v as u64)
         }
     }
 
     fn serialize_u8(self, v: u8) -> Result<Self::Ok, Self::Error> {
         if v < 24 {
-            // Does it fit in additional information?
             Ok(self.writer.write_all(&[UNSIGNED_INTEGER | v])?)
         } else {
-            // Here 0x18 represents an unsigned integer, stored in the next byte
+            // 0x18 = unsigned integer in the next byte
             Ok(self.writer.write_all(&[0x18, v])?)
         }
     }
 
     fn serialize_u16(self, v: u16) -> Result<Self::Ok, Self::Error> {
         if v <= u8::MAX as u16 {
-            // Can this u16 fit in a u8?, if it can, forward to serialize_u8
             self.serialize_u8(v as u8)
         } else {
-            // Here 0x19 represents an unsigned integer, stored in the next two bytes
+            // 0x19 = unsigned integer in the next two bytes
             self.writer.write_all(&[0x19])?;
             self.writer.write_all(&v.to_be_bytes())?;
 
@@ -192,10 +153,9 @@ impl<'a, W: Write> Serializer for &'a mut Encoder<W> {
 
     fn serialize_u32(self, v: u32) -> Result<Self::Ok, Self::Error> {
         if v <= u16::MAX as u32 {
-            // Can this u32 fit in a u16?, if it can, forward to serialize_u16
             self.serialize_u16(v as u16)
         } else {
-            // Here 0x1A represents an unsigned integer, stored in the next four bytes
+            // 0x1A = unsigned integer in the next four bytes
             self.writer.write_all(&[0x1A])?;
             self.writer.write_all(&v.to_be_bytes())?;
 
@@ -205,10 +165,9 @@ impl<'a, W: Write> Serializer for &'a mut Encoder<W> {
 
     fn serialize_u64(self, v: u64) -> Result<Self::Ok, Self::Error> {
         if v <= u32::MAX as u64 {
-            // Can this u64 fit in a u32?, if it can, forward to serialize_u32
             self.serialize_u32(v as u32)
         } else {
-            // Here 0x1B represents an unsigned integer, stored in the next eight bytes
+            // 0x1B = unsigned integer in the next eight bytes
             self.writer.write_all(&[0x1B])?;
             self.writer.write_all(&v.to_be_bytes())?;
 
@@ -242,21 +201,18 @@ impl<'a, W: Write> Serializer for &'a mut Encoder<W> {
         let string_len = v.len();
 
         if string_len < 24 {
-            // Does the string length fit in additional information?
             self.writer.write_all(&[TEXT_STRING | (string_len as u8)])?;
             self.writer.write_all(v.as_bytes())?;
 
             Ok(())
         } else if string_len <= u8::MAX as usize {
-            // Does the string length fit in a single byte?
-            // Here 0x78 represents a text string, whose length is stored in the next byte
+            // 0x78 = text string, length in the next byte
             self.writer.write_all(&[0x78, (string_len as u8)])?;
             self.writer.write_all(v.as_bytes())?;
 
             Ok(())
         } else if string_len <= u16::MAX as usize {
-            // Does the string length fit in two bytes?
-            // Here 0x79 represents a text string, whose length is stored in the next two bytes
+            // 0x79 = text string, length in the next two bytes
             self.writer.write_all(&[0x79])?;
             self.writer.write_all(&(string_len as u16).to_be_bytes())?;
             self.writer.write_all(v.as_bytes())?;
@@ -264,16 +220,14 @@ impl<'a, W: Write> Serializer for &'a mut Encoder<W> {
             Ok(())
 
         } else if string_len <= u32::MAX as usize {
-            // Does the string length fit in four bytes?
-            // Here 0x7A represents a text string, whose length is stored in the next four bytes
+            // 0x7A = text string, length in the next four bytes
             self.writer.write_all(&[0x7A])?;
             self.writer.write_all(&(string_len as u32).to_be_bytes())?;
             self.writer.write_all(v.as_bytes())?;
 
             Ok(())
         } else if string_len <= u64::MAX as usize {
-            // Does the string length fit in eight bytes?
-            // Here 0x7B represents a text string, whose length is stored in the next eight bytes
+            // 0x7B = text string, length in the next eight bytes
             self.writer.write_all(&[0x7B])?;
             self.writer.write_all(&(string_len as u64).to_be_bytes())?;
             self.writer.write_all(v.as_bytes())?;
@@ -290,37 +244,32 @@ impl<'a, W: Write> Serializer for &'a mut Encoder<W> {
         let bytestring_len = v.len();
 
         if bytestring_len < 24 {
-            // Does the byte string length fit in additional information?
             self.writer.write_all(&[BYTE_STRING | (bytestring_len as u8)])?;
             self.writer.write_all(v)?;
 
             Ok(())
         } else if bytestring_len <= u8::MAX as usize {
-            // Does the byte string length fit in a single byte?
-            // Here 0x58 represents a byte string, whose length is stored in the next byte
+            // 0x58 = byte string, length in the next byte
             self.writer.write_all(&[0x58, (bytestring_len as u8)])?;
             self.writer.write_all(v)?;
 
             Ok(())
         } else if bytestring_len <= u16::MAX as usize {
-            // Does the byte string length fit in two bytes?
-            // Here 0x59 represents a byte string, whose length is stored in the next two bytes
+            // 0x59 = byte string, length in the next two bytes
             self.writer.write_all(&[0x59])?;
             self.writer.write_all(&(bytestring_len as u16).to_be_bytes())?;
             self.writer.write_all(v)?;
 
             Ok(())
         } else if bytestring_len <= u32::MAX as usize {
-            // Does the byte string length fit in four bytes?
-            // Here 0x5A represents a byte string, whose length is stored in the next four bytes
+            // 0x5A = byte string, length in the next four bytes
             self.writer.write_all(&[0x5A])?;
             self.writer.write_all(&(bytestring_len as u32).to_be_bytes())?;
             self.writer.write_all(v)?;
 
             Ok(())
         } else if bytestring_len <= u64::MAX as usize {
-            // Does the byte string length fit in eight bytes?
-            // Here 0x5B represents a byte string, whose length is stored in the next eight bytes
+            // 0x5B = byte string, length in the next eight bytes
             self.writer.write_all(&[0x5B])?;
             self.writer.write_all(&(bytestring_len as u64).to_be_bytes())?;
             self.writer.write_all(v)?;
@@ -334,7 +283,7 @@ impl<'a, W: Write> Serializer for &'a mut Encoder<W> {
     }
 
     fn serialize_none(self) -> Result<Self::Ok, Self::Error> {
-        // Here 0xF6 represent the CBOR simple value null
+        // 0xF6 = simple value null
         Ok(self.writer.write_all(&[0xF6])?)
     }
 
@@ -346,12 +295,12 @@ impl<'a, W: Write> Serializer for &'a mut Encoder<W> {
     }
 
     fn serialize_unit(self) -> Result<Self::Ok, Self::Error> {
-        // Here 0xF6 represent the CBOR simple value null
+        // 0xF6 = simple value null
         Ok(self.writer.write_all(&[0xF6])?)
     }
 
     fn serialize_unit_struct(self, _name: &'static str) -> Result<Self::Ok, Self::Error> {
-        // Here 0xF6 represent the CBOR simple value null
+        // 0xF6 = simple value null
         Ok(self.writer.write_all(&[0xF6])?)
     }
 
@@ -437,125 +386,6 @@ impl<'a, W: Write> Serializer for &'a mut Encoder<W> {
         variant: &'static str,
         len: usize,
     ) -> Result<Self::SerializeStructVariant, Self::Error> {
-        todo!()
-    }
-}
-
-impl<'a, W: Write> SerializeSeq for SeqEncoder<'a, W> {
-    type Ok = ();
-    type Error = EncodeError;
-
-    fn serialize_element<T>(&mut self, value: &T) -> Result<(), Self::Error>
-    where
-        T: ?Sized + Serialize,
-    {
-        todo!()
-    }
-
-    fn end(self) -> Result<Self::Ok, Self::Error> {
-        todo!()
-    }
-}
-
-impl<'a, W: Write> SerializeTuple for TupleEncoder<'a, W> {
-    type Ok = ();
-    type Error = EncodeError;
-
-    fn serialize_element<T>(&mut self, value: &T) -> Result<(), Self::Error>
-    where
-        T: ?Sized + Serialize,
-    {
-        todo!()
-    }
-
-    fn end(self) -> Result<Self::Ok, Self::Error> {
-        todo!()
-    }
-}
-
-impl<'a, W: Write> SerializeTupleStruct for TupleStructEncoder<'a, W> {
-    type Ok = ();
-    type Error = EncodeError;
-
-    fn serialize_field<T>(&mut self, value: &T) -> Result<(), Self::Error>
-    where
-        T: ?Sized + Serialize,
-    {
-        todo!()
-    }
-
-    fn end(self) -> Result<Self::Ok, Self::Error> {
-        todo!()
-    }
-}
-
-impl<'a, W: Write> SerializeTupleVariant for TupleVariantEncoder<'a, W> {
-    type Ok = ();
-    type Error = EncodeError;
-
-    fn serialize_field<T>(&mut self, value: &T) -> Result<(), Self::Error>
-    where
-        T: ?Sized + Serialize,
-    {
-        todo!()
-    }
-
-    fn end(self) -> Result<Self::Ok, Self::Error> {
-        todo!()
-    }
-}
-
-impl<'a, W: Write> SerializeMap for MapEncoder<'a, W> {
-    type Ok = ();
-    type Error = EncodeError;
-
-    fn serialize_key<T>(&mut self, key: &T) -> Result<(), Self::Error>
-    where
-        T: ?Sized + Serialize,
-    {
-        todo!()
-    }
-
-    fn serialize_value<T>(&mut self, value: &T) -> Result<(), Self::Error>
-    where
-        T: ?Sized + Serialize,
-    {
-        todo!()
-    }
-
-    fn end(self) -> Result<Self::Ok, Self::Error> {
-        todo!()
-    }
-}
-
-impl<'a, W: Write> SerializeStruct for StructEncoder<'a, W> {
-    type Ok = ();
-    type Error = EncodeError;
-
-    fn serialize_field<T>(&mut self, key: &'static str, value: &T) -> Result<(), Self::Error>
-    where
-        T: ?Sized + Serialize,
-    {
-        todo!()
-    }
-
-    fn end(self) -> Result<Self::Ok, Self::Error> {
-        todo!()
-    }
-}
-
-impl<'a, W: Write> SerializeStructVariant for StructVariantEncoder<'a, W> {
-    type Ok = ();
-    type Error = EncodeError;
-
-    fn serialize_field<T>(&mut self, key: &'static str, value: &T) -> Result<(), Self::Error>
-    where
-        T: ?Sized + Serialize,
-    {
-        todo!()
-    }
-
-    fn end(self) -> Result<Self::Ok, Self::Error> {
         todo!()
     }
 }
