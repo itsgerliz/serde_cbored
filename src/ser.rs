@@ -341,34 +341,7 @@ impl<'a, W: Write> Serializer for &'a mut Encoder<W> {
     fn serialize_seq(self, len: Option<usize>) -> Result<Self::SerializeSeq, Self::Error> {
         match len {
             Some(length) => {
-                // 0x98 = array of data items, length in the next byte
-                // 0x99 = array of data items, length in the next two bytes
-                // 0x9A = array of data items, length in the next four bytes
-                // 0x9B = array of data items, length in the next eight bytes
-                match Encoder::<W>::calculate_argument_placement(length)? {
-                    ArgumentPlacement::AdditionalInformation => {
-                        self.writer.write_all(&[ARRAY_OF_ITEMS | (length as u8)])?
-                    }
-                    ArgumentPlacement::NextByte => {
-                        self.writer.write_all(&[0x98, (length as u8)])?
-                    }
-                    ArgumentPlacement::NextTwoBytes => {
-                        self.writer.write_all(&[0x99])?;
-                        self.writer.write_all(&(length as u16).to_be_bytes())?;
-                    }
-                    ArgumentPlacement::NextFourBytes => {
-                        self.writer.write_all(&[0x9A])?;
-                        self.writer.write_all(&(length as u32).to_be_bytes())?;
-                    }
-                    ArgumentPlacement::NextEightBytes => {
-                        self.writer.write_all(&[0x9B])?;
-                        self.writer.write_all(&(length as u64).to_be_bytes())?;
-                    }
-                }
-                Ok(ComplexEncoder {
-                    encoder: self,
-                    indefinite_length: false,
-                })
+                self.serialize_tuple(length)
             }
             None => {
                 // 0x9F = array of data items, indefinite length
@@ -414,10 +387,10 @@ impl<'a, W: Write> Serializer for &'a mut Encoder<W> {
 
     fn serialize_tuple_struct(
         self,
-        name: &'static str,
+        _name: &'static str,
         len: usize,
     ) -> Result<Self::SerializeTupleStruct, Self::Error> {
-        todo!()
+        self.serialize_tuple(len)
     }
 
     fn serialize_tuple_variant(
@@ -497,11 +470,11 @@ impl<'a, W: Write> SerializeTupleStruct for ComplexEncoder<'a, W> {
     where
         T: ?Sized + Serialize,
     {
-        todo!()
+        value.serialize(&mut *self.encoder)
     }
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
-        todo!()
+        Ok(())
     }
 }
 
