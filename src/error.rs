@@ -27,17 +27,13 @@ pub enum EncodeError {
     #[error("Error when serializing")]
     Serialization(String),
     /// Represents an Input/Output error while encoding, usually an error when writing to the  
-    /// [Encoder](crate::serde::ser::Encoder)'s inner writer (the encoding output)
+    /// [Encoder](crate::ser)'s inner writer (the encoder's output)
     #[error("Input/Output error")]
     IO(#[from] io::Error),
-    /// Byte slices longer than 2^64 cannot be encoded in the present CBOR RFC  
-    /// Since this is absurdly big, this error should never be returned, its only here to comply with the RFC
-    #[error("Cannot encode byte strings longer than 2^64 bytes")]
-    ByteStringTooLong,
-    /// Text strings longer than 2^64 (bytes) cannot be encoded in the present CBOR RFC  
-    /// Since this is absurdly big, this error should never be returned, its only here to comply with the RFC
-    #[error("Cannot encode text strings longer than 2^64 bytes")]
-    TextStringTooLong,
+    /// The CBOR RFC which this codec is based on does not allow data items with lengths above
+    /// 2^64 bytes, this number is absurdly big so it should not be reached
+    #[error("Cannot encode lengths above 2^64 bytes")]
+    LengthOutOfBounds,
 }
 
 /// Represents an error while decoding a CBOR data sequence
