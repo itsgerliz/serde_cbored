@@ -449,10 +449,10 @@ impl<'a, W: Write> Serializer for &'a mut Encoder<W> {
 
     fn serialize_struct(
         self,
-        name: &'static str,
+        _name: &'static str,
         len: usize,
     ) -> Result<Self::SerializeStruct, Self::Error> {
-        todo!()
+        self.serialize_map(Some(len))
     }
 
     fn serialize_struct_variant(
@@ -569,11 +569,13 @@ impl<'a, W: Write> SerializeStruct for ComplexEncoder<'a, W> {
     where
         T: ?Sized + Serialize,
     {
-        todo!()
+        key.serialize(&mut *self.encoder)?;
+        value.serialize(&mut *self.encoder)?;
+        Ok(())
     }
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
-        todo!()
+        Ok(())
     }
 }
 
