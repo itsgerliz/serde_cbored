@@ -382,7 +382,34 @@ impl<'a, W: Write> Serializer for &'a mut Encoder<W> {
     }
 
     fn serialize_tuple(self, len: usize) -> Result<Self::SerializeTuple, Self::Error> {
-        todo!()
+        // 0x98 = array of data items, length in the next byte
+        // 0x99 = array of data items, length in the next two bytes
+        // 0x9A = array of data items, length in the next four bytes
+        // 0x9B = array of data items, length in the next eight bytes
+        match Encoder::<W>::calculate_argument_placement(len)? {
+            ArgumentPlacement::AdditionalInformation => {
+                self.writer.write_all(&[ARRAY_OF_ITEMS | (len as u8)])?
+            }
+            ArgumentPlacement::NextByte => {
+                self.writer.write_all(&[0x98, (len as u8)])?
+            }
+            ArgumentPlacement::NextTwoBytes => {
+                self.writer.write_all(&[0x99])?;
+                self.writer.write_all(&(len as u16).to_be_bytes())?;
+            }
+            ArgumentPlacement::NextFourBytes => {
+                self.writer.write_all(&[0x9A])?;
+                self.writer.write_all(&(len as u32).to_be_bytes())?;
+            }
+            ArgumentPlacement::NextEightBytes => {
+                self.writer.write_all(&[0x9B])?;
+                self.writer.write_all(&(len as u64).to_be_bytes())?;
+            }
+        }
+        Ok(ComplexEncoder {
+            encoder: self,
+            indefinite_length: false,
+        })
     }
 
     fn serialize_tuple_struct(
@@ -454,11 +481,11 @@ impl<'a, W: Write> SerializeTuple for ComplexEncoder<'a, W> {
     where
         T: ?Sized + Serialize,
     {
-        todo!()
+        value.serialize(&mut *self.encoder)
     }
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
-        todo!()
+        Ok(())
     }
 }
 
