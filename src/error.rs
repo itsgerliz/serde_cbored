@@ -49,6 +49,12 @@ pub enum DecodeError {
     /// The obtained type from deserialization is not the expected one
     #[error("Invalid type")]
     InvalidType,
+    /// The decoded integer underflows the expected type bounds
+    #[error("Integer underflow")]
+    IntegerUnderflow,
+    /// The decoded integer overflows the expected type bounds
+    #[error("Integer overflow")]
+    IntegerOverflow,
 }
 
 impl ser::Error for EncodeError {

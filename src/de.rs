@@ -68,7 +68,31 @@ impl<'de, R: Read> Deserializer<'de> for &mut Decoder<R> {
 	fn deserialize_i8<V>(self, visitor: V) -> Result<V::Value, Self::Error>
 	where
 		V: Visitor<'de> {
-		todo!()
+		let initial_byte = self.read_u8()?;
+		match initial_byte {
+			// 0x20..=0x37 negative integer with additional information 0 to 23
+			0x20..=0x37 => {
+				let encoded_value = -1 - ((initial_byte & 0x1F) as i8);
+				visitor.visit_i8(encoded_value)
+			},
+			// 0x38 = negative integer, value in the next byte
+			0x38 => {
+				// When reading the next byte we could read something out of i8 bounds,
+				// for example, 234, what would result in -1 - (234 as i8), what becomes
+				// -1 - (-22), therefore computing 21, a wrong value
+				// We fix this by computing the encoded value in a wide signed integer
+				// and then doing a bound check
+				let encoded_value = -1 - (self.read_u8()? as i64);
+				if encoded_value < i8::MIN as i64 {
+					Err(DecodeError::IntegerUnderflow)
+				} else if encoded_value > i8::MAX as i64 {
+					Err(DecodeError::IntegerOverflow)
+				} else {
+					visitor.visit_i8(encoded_value as i8)
+				}
+			},
+			_ => Err(DecodeError::InvalidType)
+		}
 	}
 
 	fn deserialize_i16<V>(self, visitor: V) -> Result<V::Value, Self::Error>
