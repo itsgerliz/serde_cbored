@@ -399,6 +399,9 @@ impl<'a, W: Write> Serializer for &'a mut Encoder<W> {
         variant: &'static str,
         len: usize,
     ) -> Result<Self::SerializeTupleVariant, Self::Error> {
+        // We serialize it as a tuple with len elements + 1 for the variant name
+        // then return the tuple_encoder so the caller can keep serializing the
+        // remaining fields
         let mut tuple_encoder = self.serialize_tuple(len + 1)?;
         SerializeTupleVariant::serialize_field(&mut tuple_encoder, variant)?;
         Ok(tuple_encoder)
@@ -457,12 +460,21 @@ impl<'a, W: Write> Serializer for &'a mut Encoder<W> {
 
     fn serialize_struct_variant(
         self,
-        name: &'static str,
-        variant_index: u32,
+        _name: &'static str,
+        _variant_index: u32,
         variant: &'static str,
         len: usize,
     ) -> Result<Self::SerializeStructVariant, Self::Error> {
-        todo!()
+        // We serialize it as a tuple with two elements, the variant name
+        // and a map containing the struct fields
+        // First, write the header of the tuple
+        // Then, write the variant name as the first element of the tuple
+        // Finally, write the header of the map as second element and return
+        // the map_encoder so the caller can serialize the remaining fields
+        let mut tuple_encoder = self.serialize_tuple(2)?;
+        SerializeTuple::serialize_element(&mut tuple_encoder, variant)?;
+        let map_encoder = self.serialize_map(Some(len))?;
+        Ok(map_encoder)
     }
 }
 
@@ -587,10 +599,12 @@ impl<'a, W: Write> SerializeStructVariant for ComplexEncoder<'a, W> {
     where
         T: ?Sized + Serialize,
     {
-        todo!()
+        key.serialize(&mut *self.encoder)?;
+        value.serialize(&mut *self.encoder)?;
+        Ok(())
     }
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
-        todo!()
+        Ok(())
     }
 }
