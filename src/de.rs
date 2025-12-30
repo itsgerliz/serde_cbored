@@ -1,14 +1,28 @@
 //! The CBOR decoder
 
-use std::io::{BufReader, Read};
-
-use serde::de::{Deserializer, Visitor};
-
 use crate::error::DecodeError;
+use serde::de::{Deserializer, Visitor};
+use std::io::{BufReader, Read};
 
 /// The encoder type
 pub struct Decoder<R: Read> {
     reader: BufReader<R>,
+}
+
+enum SignedIntegerTarget {
+    AdditionalInformation,
+    Signed8,
+    Signed16,
+    Signed32,
+    Signed64,
+}
+
+enum UnsignedIntegerTarget {
+    AdditionalInformation,
+    Unsigned8,
+    Unsigned16,
+    Unsigned32,
+    Unsigned64,
 }
 
 impl<R: Read> Decoder<R> {
@@ -42,235 +56,276 @@ impl<R: Read> Decoder<R> {
         self.reader.read_exact(&mut u64_buf)?;
         Ok(u64::from_be_bytes(u64_buf))
     }
+
+    fn decode_signed_integer_with_bounds(
+        raw_value: u64,
+        upper_bound: u64,
+    ) -> Result<i64, DecodeError> {
+        if raw_value > upper_bound {
+            Err(DecodeError::IntegerOutOfBounds)
+        } else {
+            Ok(-1 - (raw_value as i64))
+        }
+    }
 }
 
 impl<'de, R: Read> Deserializer<'de> for &mut Decoder<R> {
-	type Error = DecodeError;
+    type Error = DecodeError;
 
-	fn deserialize_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-	where
-		V: Visitor<'de> {
-		todo!()
-	}
+    fn deserialize_any<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        todo!()
+    }
 
-	fn deserialize_bool<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-	where
-		V: Visitor<'de> {
-		let byte = self.read_u8()?;
+    fn deserialize_bool<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        let byte = self.read_u8()?;
         // 0xF5 = true | 0xF4 = false
-		match byte {
-			0xF5 => visitor.visit_bool(true),
-			0xF4 => visitor.visit_bool(false),
-			_ => Err(DecodeError::InvalidType),
-		}
-	}
+        match byte {
+            0xF5 => visitor.visit_bool(true),
+            0xF4 => visitor.visit_bool(false),
+            _ => Err(DecodeError::InvalidType),
+        }
+    }
 
-	fn deserialize_i8<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-	where
-		V: Visitor<'de> {
-		let initial_byte = self.read_u8()?;
-		match initial_byte {
-			// 0x20..=0x37 negative integer with additional information 0 to 23
-			0x20..=0x37 => {
-				let encoded_value = -1 - ((initial_byte & 0x1F) as i8);
-				visitor.visit_i8(encoded_value)
-			},
-			// 0x38 = negative integer, value in the next byte
-			0x38 => {
-				// When reading the next byte we could read something out of i8 bounds,
-				// for example, 234, what would result in -1 - (234 as i8), what becomes
-				// -1 - (-22), therefore computing 21, a wrong value
-				// We fix this by computing the encoded value in a wide signed integer
-				// and then doing a bound check
-				let encoded_value = -1 - (self.read_u8()? as i64);
-				if encoded_value < i8::MIN as i64 {
-					Err(DecodeError::IntegerUnderflow)
-				} else if encoded_value > i8::MAX as i64 {
-					Err(DecodeError::IntegerOverflow)
-				} else {
-					visitor.visit_i8(encoded_value as i8)
-				}
-			},
-			_ => Err(DecodeError::InvalidType)
-		}
-	}
+    fn deserialize_i8<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        let byte = self.read_u8()?;
+        match byte {
+            // 0x20..=0x37 negative integer with additional information 0 to 23
+            0x20..=0x37 => visitor.visit_i8(-1 - ((byte & 0x1F) as i8)),
+            // 0x38 = negative integer, value in the next byte
+            0x38 => visitor.visit_i8(Decoder::<R>::decode_signed_integer_with_bounds(
+                self.read_u8()? as u64,
+                i8::MAX as u64,
+            )? as i8),
+            // 0x39 = negative integer, value in the next two bytes
+            0x39 => visitor.visit_i8(Decoder::<R>::decode_signed_integer_with_bounds(
+                self.read_u16()? as u64,
+                i8::MAX as u64,
+            )? as i8),
+            // 0x3A = negative integer, value in the next four bytes
+            0x3A => visitor.visit_i8(Decoder::<R>::decode_signed_integer_with_bounds(
+                self.read_u32()? as u64,
+                i8::MAX as u64,
+            )? as i8),
+            // 0x3B = negative integer, value in the next eight bytes
+            0x3B => visitor.visit_i8(Decoder::<R>::decode_signed_integer_with_bounds(
+                self.read_u64()?,
+                i8::MAX as u64
+            )? as i8),
+            _ => Err(DecodeError::InvalidType),
+        }
+    }
 
-	fn deserialize_i16<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-	where
-		V: Visitor<'de> {
-		todo!()
-	}
+    fn deserialize_i16<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        todo!()
+    }
 
-	fn deserialize_i32<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-	where
-		V: Visitor<'de> {
-		todo!()
-	}
+    fn deserialize_i32<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        todo!()
+    }
 
-	fn deserialize_i64<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-	where
-		V: Visitor<'de> {
-		todo!()
-	}
+    fn deserialize_i64<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        todo!()
+    }
 
-	fn deserialize_u8<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-	where
-		V: Visitor<'de> {
-		todo!()
-	}
+    fn deserialize_u8<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        todo!()
+    }
 
-	fn deserialize_u16<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-	where
-		V: Visitor<'de> {
-		todo!()
-	}
+    fn deserialize_u16<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        todo!()
+    }
 
-	fn deserialize_u32<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-	where
-		V: Visitor<'de> {
-		todo!()
-	}
+    fn deserialize_u32<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        todo!()
+    }
 
-	fn deserialize_u64<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-	where
-		V: Visitor<'de> {
-		todo!()
-	}
+    fn deserialize_u64<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        todo!()
+    }
 
-	fn deserialize_f32<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-	where
-		V: Visitor<'de> {
-		todo!()
-	}
+    fn deserialize_f32<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        todo!()
+    }
 
-	fn deserialize_f64<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-	where
-		V: Visitor<'de> {
-		todo!()
-	}
+    fn deserialize_f64<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        todo!()
+    }
 
-	fn deserialize_char<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-	where
-		V: Visitor<'de> {
-		todo!()
-	}
+    fn deserialize_char<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        todo!()
+    }
 
-	fn deserialize_str<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-	where
-		V: Visitor<'de> {
-		todo!()
-	}
+    fn deserialize_str<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        todo!()
+    }
 
-	fn deserialize_string<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-	where
-		V: Visitor<'de> {
-		todo!()
-	}
+    fn deserialize_string<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        todo!()
+    }
 
-	fn deserialize_bytes<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-	where
-		V: Visitor<'de> {
-		todo!()
-	}
+    fn deserialize_bytes<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        todo!()
+    }
 
-	fn deserialize_byte_buf<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-	where
-		V: Visitor<'de> {
-		todo!()
-	}
+    fn deserialize_byte_buf<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        todo!()
+    }
 
-	fn deserialize_option<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-	where
-		V: Visitor<'de> {
-		todo!()
-	}
+    fn deserialize_option<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        todo!()
+    }
 
-	fn deserialize_unit<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-	where
-		V: Visitor<'de> {
-		todo!()
-	}
+    fn deserialize_unit<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        todo!()
+    }
 
-	fn deserialize_unit_struct<V>(
-		self,
-		name: &'static str,
-		visitor: V,
-	) -> Result<V::Value, Self::Error>
-	where
-		V: Visitor<'de> {
-		todo!()
-	}
+    fn deserialize_unit_struct<V>(
+        self,
+        name: &'static str,
+        visitor: V,
+    ) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        todo!()
+    }
 
-	fn deserialize_newtype_struct<V>(
-		self,
-		name: &'static str,
-		visitor: V,
-	) -> Result<V::Value, Self::Error>
-	where
-		V: Visitor<'de> {
-		todo!()
-	}
+    fn deserialize_newtype_struct<V>(
+        self,
+        name: &'static str,
+        visitor: V,
+    ) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        todo!()
+    }
 
-	fn deserialize_seq<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-	where
-		V: Visitor<'de> {
-		todo!()
-	}
+    fn deserialize_seq<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        todo!()
+    }
 
-	fn deserialize_tuple<V>(self, len: usize, visitor: V) -> Result<V::Value, Self::Error>
-	where
-		V: Visitor<'de> {
-		todo!()
-	}
+    fn deserialize_tuple<V>(self, len: usize, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        todo!()
+    }
 
-	fn deserialize_tuple_struct<V>(
-		self,
-		name: &'static str,
-		len: usize,
-		visitor: V,
-	) -> Result<V::Value, Self::Error>
-	where
-		V: Visitor<'de> {
-		todo!()
-	}
+    fn deserialize_tuple_struct<V>(
+        self,
+        name: &'static str,
+        len: usize,
+        visitor: V,
+    ) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        todo!()
+    }
 
-	fn deserialize_map<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-	where
-		V: Visitor<'de> {
-		todo!()
-	}
+    fn deserialize_map<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        todo!()
+    }
 
-	fn deserialize_struct<V>(
-		self,
-		name: &'static str,
-		fields: &'static [&'static str],
-		visitor: V,
-	) -> Result<V::Value, Self::Error>
-	where
-		V: Visitor<'de> {
-		todo!()
-	}
+    fn deserialize_struct<V>(
+        self,
+        name: &'static str,
+        fields: &'static [&'static str],
+        visitor: V,
+    ) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        todo!()
+    }
 
-	fn deserialize_enum<V>(
-		self,
-		name: &'static str,
-		variants: &'static [&'static str],
-		visitor: V,
-	) -> Result<V::Value, Self::Error>
-	where
-		V: Visitor<'de> {
-		todo!()
-	}
+    fn deserialize_enum<V>(
+        self,
+        name: &'static str,
+        variants: &'static [&'static str],
+        visitor: V,
+    ) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        todo!()
+    }
 
-	fn deserialize_identifier<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-	where
-		V: Visitor<'de> {
-		todo!()
-	}
+    fn deserialize_identifier<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        todo!()
+    }
 
-	fn deserialize_ignored_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-	where
-		V: Visitor<'de> {
-		todo!()
-	}
+    fn deserialize_ignored_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        todo!()
+    }
 }

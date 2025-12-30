@@ -46,15 +46,12 @@ pub enum DecodeError {
     /// from [Decoder](crate::de)'s input
     #[error("Input/Output error")]
     IO(#[from] io::Error),
-    /// The obtained type from deserialization is not the expected one
+    /// The decoded data type is not the expected one
     #[error("Invalid type")]
     InvalidType,
-    /// The decoded integer underflows the expected type bounds
-    #[error("Integer underflow")]
-    IntegerUnderflow,
-    /// The decoded integer overflows the expected type bounds
-    #[error("Integer overflow")]
-    IntegerOverflow,
+    /// The decoded integer is out of the bounds of the expected type
+    #[error("Integer out of bounds")]
+    IntegerOutOfBounds,
 }
 
 impl ser::Error for EncodeError {
