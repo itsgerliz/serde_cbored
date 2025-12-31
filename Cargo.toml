@@ -1,11 +1,11 @@
 [package]
-name = "cbor_ed"
+name = "serde_cbored"
 version = "0.1.0-dev"
 edition = "2024"
-description = "A CBOR implementation for the serde framework"
+description = "A CBOR codec for the serde framework"
 repository = "https://github.com/itsgerliz/CBORed"
 license = "BSD-3-Clause"
-keywords = ["cbor", "serde", "format", "binary", "encoding"]
+keywords = ["cbor", "serde", "codec", "encoding", "format"]
 categories = ["encoding"]
 
 [dependencies]

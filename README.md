@@ -1,4 +1,4 @@
-# CBORed
+# serde_cbored
 A CBOR codec for the serde framework
 
 ## Considerations
@@ -6,7 +6,7 @@ A CBOR codec for the serde framework
 - It is under heavy development and unfinished
 
 ## Development
-CBORed uses [Conventional Commits v1.0.0](https://www.conventionalcommits.org/en/v1.0.0/) and [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html)
+serde_cbored uses [Conventional Commits v1.0.0](https://www.conventionalcommits.org/en/v1.0.0/) and [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html)
 
 ## Contributing
 Contributions are welcome, pull requests, issues, whatever
