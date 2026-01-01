@@ -9,6 +9,13 @@ pub struct Decoder<R: Read> {
     reader: BufReader<R>,
 }
 
+enum SignedIntegerTarget {
+    Signed8,
+    Signed16,
+    Signed32,
+    Signed64
+}
+
 impl<R: Read> Decoder<R> {
     /// Construct a new decoder, which will read its input from `R`
     pub fn new(source: R) -> Self {
@@ -39,6 +46,31 @@ impl<R: Read> Decoder<R> {
         let mut u64_buf: [u8; 8] = [0; 8];
         self.reader.read_exact(&mut u64_buf)?;
         Ok(u64::from_be_bytes(u64_buf))
+    }
+
+    fn dispatch_signed_integer(&mut self, target: SignedIntegerTarget) -> Result<i64, DecodeError> {
+        let initial_byte = self.read_u8()?;
+        let raw_value = match initial_byte {
+            // 0x20..=0x37 negative integer with additional information 0 to 23
+            // We early return here instead of dispatching since its the same logic for all targets
+            0x20..=0x37 => return Ok(-1 - ((initial_byte & 0x1F) as i64)),
+            // 0x38 = negative integer, value in the next byte
+            0x38 => self.read_u8()? as u64,
+            // 0x39 = negative integer, value in the next two bytes
+            0x39 => self.read_u16()? as u64,
+            // 0x3A = negative integer, value in the next four bytes
+            0x3A => self.read_u32()? as u64,
+            // 0x3B = negative integer, value in the next eight bytes
+            0x3B => self.read_u64()?,
+            _ => return Err(DecodeError::InvalidType),
+        };
+        let upper_bound = match target {
+            SignedIntegerTarget::Signed8 => i8::MAX as u64,
+            SignedIntegerTarget::Signed16 => i16::MAX as u64,
+            SignedIntegerTarget::Signed32 => i32::MAX as u64,
+            SignedIntegerTarget::Signed64 => i64::MAX as u64,
+        };
+        Self::decode_signed_integer_with_bounds(raw_value, upper_bound)
     }
 
     fn decode_signed_integer_with_bounds(
@@ -80,132 +112,36 @@ impl<'de, R: Read> Deserializer<'de> for &mut Decoder<R> {
     where
         V: Visitor<'de>,
     {
-        let byte = self.read_u8()?;
-        let encoded_value = match byte {
-            // 0x20..=0x37 negative integer with additional information 0 to 23
-            0x20..=0x37 => -1 - ((byte & 0x1F) as i8),
-            // 0x38 = negative integer, value in the next byte
-            0x38 => Decoder::<R>::decode_signed_integer_with_bounds(
-                self.read_u8()? as u64,
-                i8::MAX as u64,
-            )? as i8,
-            // 0x39 = negative integer, value in the next two bytes
-            0x39 => Decoder::<R>::decode_signed_integer_with_bounds(
-                self.read_u16()? as u64,
-                i8::MAX as u64,
-            )? as i8,
-            // 0x3A = negative integer, value in the next four bytes
-            0x3A => Decoder::<R>::decode_signed_integer_with_bounds(
-                self.read_u32()? as u64,
-                i8::MAX as u64,
-            )? as i8,
-            // 0x3B = negative integer, value in the next eight bytes
-            0x3B => Decoder::<R>::decode_signed_integer_with_bounds(
-                self.read_u64()?,
-                i8::MAX as u64
-            )? as i8,
-            _ => return Err(DecodeError::InvalidType),
-        };
-        visitor.visit_i8(encoded_value)
+        visitor.visit_i8(
+            self.dispatch_signed_integer(SignedIntegerTarget::Signed8)? as i8
+        )
     }
 
     fn deserialize_i16<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
         V: Visitor<'de>,
     {
-        let byte = self.read_u8()?;
-        let encoded_value = match byte {
-            // 0x20..=0x37 negative integer with additional information 0 to 23
-            0x20..=0x37 => -1 - ((byte & 0x1F) as i16),
-            // 0x38 = negative integer, value in the next byte
-            0x38 => Decoder::<R>::decode_signed_integer_with_bounds(
-                self.read_u8()? as u64,
-                i16::MAX as u64,
-            )? as i16,
-            // 0x39 = negative integer, value in the next two bytes
-            0x39 => Decoder::<R>::decode_signed_integer_with_bounds(
-                self.read_u16()? as u64,
-                i16::MAX as u64,
-            )? as i16,
-            // 0x3A = negative integer, value in the next four bytes
-            0x3A => Decoder::<R>::decode_signed_integer_with_bounds(
-                self.read_u32()? as u64,
-                i16::MAX as u64,
-            )? as i16,
-            // 0x3B = negative integer, value in the next eight bytes
-            0x3B => Decoder::<R>::decode_signed_integer_with_bounds(
-                self.read_u64()?,
-                i16::MAX as u64
-            )? as i16,
-            _ => return Err(DecodeError::InvalidType),
-        };
-        visitor.visit_i16(encoded_value)
+        visitor.visit_i16(
+            self.dispatch_signed_integer(SignedIntegerTarget::Signed16)? as i16
+        )
     }
 
     fn deserialize_i32<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
         V: Visitor<'de>,
     {
-        let byte = self.read_u8()?;
-        let encoded_value = match byte {
-            // 0x20..=0x37 negative integer with additional information 0 to 23
-            0x20..=0x37 => -1 - ((byte & 0x1F) as i32),
-            // 0x38 = negative integer, value in the next byte
-            0x38 => Decoder::<R>::decode_signed_integer_with_bounds(
-                self.read_u8()? as u64,
-                i32::MAX as u64,
-            )? as i32,
-            // 0x39 = negative integer, value in the next two bytes
-            0x39 => Decoder::<R>::decode_signed_integer_with_bounds(
-                self.read_u16()? as u64,
-                i32::MAX as u64,
-            )? as i32,
-            // 0x3A = negative integer, value in the next four bytes
-            0x3A => Decoder::<R>::decode_signed_integer_with_bounds(
-                self.read_u32()? as u64,
-                i32::MAX as u64,
-            )? as i32,
-            // 0x3B = negative integer, value in the next eight bytes
-            0x3B => Decoder::<R>::decode_signed_integer_with_bounds(
-                self.read_u64()?,
-                i32::MAX as u64
-            )? as i32,
-            _ => return Err(DecodeError::InvalidType),
-        };
-        visitor.visit_i32(encoded_value)
+        visitor.visit_i32(
+            self.dispatch_signed_integer(SignedIntegerTarget::Signed32)? as i32
+        )
     }
 
     fn deserialize_i64<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
         V: Visitor<'de>,
     {
-        let byte = self.read_u8()?;
-        let encoded_value = match byte {
-            // 0x20..=0x37 negative integer with additional information 0 to 23
-            0x20..=0x37 => -1 - ((byte & 0x1F) as i64),
-            // 0x38 = negative integer, value in the next byte
-            0x38 => Decoder::<R>::decode_signed_integer_with_bounds(
-                self.read_u8()? as u64,
-                i64::MAX as u64,
-            )? as i64,
-            // 0x39 = negative integer, value in the next two bytes
-            0x39 => Decoder::<R>::decode_signed_integer_with_bounds(
-                self.read_u16()? as u64,
-                i64::MAX as u64,
-            )? as i64,
-            // 0x3A = negative integer, value in the next four bytes
-            0x3A => Decoder::<R>::decode_signed_integer_with_bounds(
-                self.read_u32()? as u64,
-                i64::MAX as u64,
-            )? as i64,
-            // 0x3B = negative integer, value in the next eight bytes
-            0x3B => Decoder::<R>::decode_signed_integer_with_bounds(
-                self.read_u64()?,
-                i64::MAX as u64
-            )?,
-            _ => return Err(DecodeError::InvalidType),
-        };
-        visitor.visit_i64(encoded_value)
+        visitor.visit_i64(
+            self.dispatch_signed_integer(SignedIntegerTarget::Signed64)?
+        )
     }
 
     fn deserialize_u8<V>(self, visitor: V) -> Result<V::Value, Self::Error>
