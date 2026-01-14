@@ -237,11 +237,25 @@ impl<'de, R: Read> Deserializer<'de> for &mut Decoder<R> {
         todo!()
     }
 
+    // Even though CBOR RFC mandates all text strings to be valid UTF-8 we do check for correctness
     fn deserialize_char<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
         V: Visitor<'de>,
     {
-        todo!()
+        let byte = self.read_u8()?;
+        let data = match byte {
+            0x61 => self.read_u8()? as u32,
+            0x62 => self.read_u16()? as u32,
+            0x63 => 
+            0x64 => self.read_u32()?,
+            _ => DecodeError::InvalidType,
+        }
+        let decoded_char = char::from_u32(data);
+        if let Some(char) = decoded_char {
+            visitor.visit_char(char)
+        } else {
+            Err(DecodeError::InvalidCharacter)
+        }
     }
 
     fn deserialize_str<V>(self, visitor: V) -> Result<V::Value, Self::Error>

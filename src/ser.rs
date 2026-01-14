@@ -1,7 +1,6 @@
 //! The CBOR encoder
 
 use crate::{
-    ARRAY_OF_ITEMS, BYTE_STRING, MAP_OF_ITEMS, NEGATIVE_INTEGER, TEXT_STRING, UNSIGNED_INTEGER,
     error::EncodeError,
 };
 use serde::ser::{
@@ -18,8 +17,8 @@ pub struct Encoder<W: Write> {
 }
 
 /// The complex encoder type
-pub struct ComplexEncoder<'a, W: Write> {
-    encoder: &'a mut Encoder<W>,
+pub struct ComplexEncoder<'encoder, W: Write> {
+    encoder: &'encoder mut Encoder<W>,
     indefinite_length: bool,
 }
 
@@ -51,25 +50,24 @@ impl<W: Write> Encoder<W> {
         Ok(self.writer.flush()?)
     }
 
-    // When encoding a text or byte string, an array or a map the length must be
-    // encoded as the smallest form possible, this function does a chain of
-    // comparisons to tell the caller function where should the argument be placed
-    fn calculate_argument_placement(length: usize) -> Result<ArgumentPlacement, EncodeError> {
-        if length < 24 {
-            Ok(ArgumentPlacement::AdditionalInformation)
-        } else if length <= u8::MAX as usize {
-            Ok(ArgumentPlacement::NextByte)
-        } else if length <= u16::MAX as usize {
-            Ok(ArgumentPlacement::NextTwoBytes)
-        } else if length <= u32::MAX as usize {
-            Ok(ArgumentPlacement::NextFourBytes)
-        } else if length <= u64::MAX as usize {
-            Ok(ArgumentPlacement::NextEightBytes)
-        } else {
-            // The CBOR RFC which this codec is based on does not allow lengths
-            // above 2^64 bytes, this block is here just for compliance with the RFC
-            Err(EncodeError::LengthOutOfBounds)
-        }
+    fn write_u8(&mut self, data: u8) -> Result<(), EncodeError> {
+        Ok(self.writer.write_all(&[data])?)
+    }
+
+    fn write_u16(&mut self, data: u16) -> Result<(), EncodeError> {
+        Ok(self.writer.write_all(&data.to_be_bytes())?)
+    }
+
+    fn write_u32(&mut self, data: u32) -> Result<(), EncodeError> {
+        Ok(self.writer.write_all(&data.to_be_bytes())?)
+    }
+
+    fn write_u64(&mut self, data: u64) -> Result<(), EncodeError> {
+        Ok(self.writer.write_all(&data.to_be_bytes())?)
+    }
+
+    fn write_bytes(&mut self, data: &[u8]) -> Result<(), EncodeError> {
+        Ok(self.writer.write_all(data)?)
     }
 }
 
@@ -87,19 +85,19 @@ impl<'a, W: Write> Serializer for &'a mut Encoder<W> {
 
     fn serialize_bool(self, v: bool) -> Result<Self::Ok, Self::Error> {
         // 0xF5 = true | 0xF4 = false
-        let byte: u8 = if v { 0xF5 } else { 0xF4 };
-
-        Ok(self.writer.write_all(&[byte])?)
+        let boolean = if v { 0xF5 } else { 0xF4 };
+        self.write_u8(boolean)
     }
 
     fn serialize_i8(self, v: i8) -> Result<Self::Ok, Self::Error> {
         if v < 0 {
-            let encoded_value: u8 = (-1 - v) as u8;
+            let encoded_value = (-1 - v) as u8;
             if encoded_value < 24 {
-                Ok(self.writer.write_all(&[NEGATIVE_INTEGER | encoded_value])?)
+                // 0x20 = negative integer major type
+                self.write_u8(0x20 | encoded_value)
             } else {
                 // 0x38 = negative integer in the next byte
-                Ok(self.writer.write_all(&[0x38, encoded_value])?)
+                self.write_bytes(&[0x38, encoded_value])
             }
         } else {
             self.serialize_u8(v as u8)
@@ -108,16 +106,10 @@ impl<'a, W: Write> Serializer for &'a mut Encoder<W> {
 
     fn serialize_i16(self, v: i16) -> Result<Self::Ok, Self::Error> {
         if v < 0 {
-            if v >= i8::MIN as i16 {
-                self.serialize_i8(v as i8)
-            } else {
-                let encoded_value: u16 = (-1 - v) as u16;
-                // 0x39 = negative integer in the next two bytes
-                self.writer.write_all(&[0x39])?;
-                self.writer.write_all(&encoded_value.to_be_bytes())?;
-
-                Ok(())
-            }
+            let encoded_value = (-1 - v) as u16;
+            // 0x39 = negative integer in the next two bytes
+            self.write_u8(0x39);
+            self.write_u16(encoded_value)
         } else {
             self.serialize_u16(v as u16)
         }
@@ -125,16 +117,10 @@ impl<'a, W: Write> Serializer for &'a mut Encoder<W> {
 
     fn serialize_i32(self, v: i32) -> Result<Self::Ok, Self::Error> {
         if v < 0 {
-            if v >= i16::MIN as i32 {
-                self.serialize_i16(v as i16)
-            } else {
-                let encoded_value: u32 = (-1 - v) as u32;
-                // 0x3A = negative integer in the next four bytes
-                self.writer.write_all(&[0x3A])?;
-                self.writer.write_all(&encoded_value.to_be_bytes())?;
-
-                Ok(())
-            }
+            let encoded_value = (-1 - v) as u32;
+            // 0x3A = negative integer in the next four bytes
+            self.write_u8(0x3A);
+            self.write_u32(encoded_value)
         } else {
             self.serialize_u32(v as u32)
         }
@@ -142,16 +128,10 @@ impl<'a, W: Write> Serializer for &'a mut Encoder<W> {
 
     fn serialize_i64(self, v: i64) -> Result<Self::Ok, Self::Error> {
         if v < 0 {
-            if v >= i32::MIN as i64 {
-                self.serialize_i32(v as i32)
-            } else {
-                let encoded_value: u64 = (-1 - v) as u64;
-                // 0x3B = negative integer in the next eight bytes
-                self.writer.write_all(&[0x3B])?;
-                self.writer.write_all(&encoded_value.to_be_bytes())?;
-
-                Ok(())
-            }
+            let encoded_value = (-1 - v) as u64;
+            // 0x3B = negative integer in the next eight bytes
+            self.write_u8(0x3B);
+            self.write_u64(encoded_value)
         } else {
             self.serialize_u64(v as u64)
         }
@@ -159,69 +139,48 @@ impl<'a, W: Write> Serializer for &'a mut Encoder<W> {
 
     fn serialize_u8(self, v: u8) -> Result<Self::Ok, Self::Error> {
         if v < 24 {
-            Ok(self.writer.write_all(&[UNSIGNED_INTEGER | v])?)
+            // 0x00 = unsigned integer major type
+            self.write_u8(0x00 | v)
         } else {
             // 0x18 = unsigned integer in the next byte
-            Ok(self.writer.write_all(&[0x18, v])?)
+            self.write_bytes(&[0x18, v])
         }
     }
 
     fn serialize_u16(self, v: u16) -> Result<Self::Ok, Self::Error> {
-        if v <= u8::MAX as u16 {
-            self.serialize_u8(v as u8)
-        } else {
-            // 0x19 = unsigned integer in the next two bytes
-            self.writer.write_all(&[0x19])?;
-            self.writer.write_all(&v.to_be_bytes())?;
-
-            Ok(())
-        }
+        // 0x19 = unsigned integer in the next two bytes
+        self.write_u8(0x19);
+        self.write_u16(v)
     }
 
     fn serialize_u32(self, v: u32) -> Result<Self::Ok, Self::Error> {
-        if v <= u16::MAX as u32 {
-            self.serialize_u16(v as u16)
-        } else {
-            // 0x1A = unsigned integer in the next four bytes
-            self.writer.write_all(&[0x1A])?;
-            self.writer.write_all(&v.to_be_bytes())?;
-
-            Ok(())
-        }
+        // 0x1A = unsigned integer in the next four bytes
+        self.write_u8(0x1A);
+        self.write_u32(v)
     }
 
     fn serialize_u64(self, v: u64) -> Result<Self::Ok, Self::Error> {
-        if v <= u32::MAX as u64 {
-            self.serialize_u32(v as u32)
-        } else {
-            // 0x1B = unsigned integer in the next eight bytes
-            self.writer.write_all(&[0x1B])?;
-            self.writer.write_all(&v.to_be_bytes())?;
-
-            Ok(())
-        }
+        // 0x1B = unsigned integer in the next eight bytes
+        self.write_u8(0x1B);
+        self.write_u64(v)
     }
 
     fn serialize_f32(self, _v: f32) -> Result<Self::Ok, Self::Error> {
-        // TODO
         todo!("Will be implemented in future versions")
     }
 
     fn serialize_f64(self, _v: f64) -> Result<Self::Ok, Self::Error> {
-        // TODO
         todo!("Will be implemented in future versions")
     }
 
     fn serialize_char(self, v: char) -> Result<Self::Ok, Self::Error> {
-        let data_item_header: u8 = TEXT_STRING | (v.len_utf8() as u8);
+        let header = 0x60 | v.len_utf8() as u8;
 
         let mut buf: [u8; 4] = [0; 4];
         let utf8_bytes = v.encode_utf8(&mut buf).as_bytes();
 
-        self.writer.write_all(&[data_item_header])?;
-        self.writer.write_all(utf8_bytes)?;
-
-        Ok(())
+        self.write_u8(header);
+        self.write_bytes(utf8_bytes)
     }
 
     fn serialize_str(self, v: &str) -> Result<Self::Ok, Self::Error> {
