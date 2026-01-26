@@ -1,8 +1,6 @@
 //! The CBOR encoder
 
-use crate::{
-    error::EncodeError,
-};
+use crate::error::EncodeError;
 use serde::ser::{
     Serialize, SerializeMap, SerializeSeq, SerializeStruct, SerializeStructVariant, SerializeTuple,
     SerializeTupleStruct, SerializeTupleVariant, Serializer,
@@ -210,17 +208,17 @@ impl<'a, W: Write> Serializer for &'a mut Encoder<W> {
                 // 0x79 = text string, length in the next two bytes
                 self.write_u8(0x79)?;
                 self.write_u16(v_length as u16)?
-            },
+            }
             LengthPlacement::NextFourBytes => {
                 // 0x7A = text string, length in the next four bytes
                 self.write_u8(0x7A)?;
                 self.write_u32(v_length as u32)?
-            },
+            }
             LengthPlacement::NextEightBytes => {
                 // 0x7B = text string, length in the next eight bytes
                 self.write_u8(0x7B)?;
                 self.write_u64(v_length as u64)?
-            },
+            }
         }
         self.write_bytes(v.as_bytes())
     }
@@ -236,17 +234,17 @@ impl<'a, W: Write> Serializer for &'a mut Encoder<W> {
                 // 0x59 = byte string, length in the next two bytes
                 self.write_u8(0x59)?;
                 self.write_u16(v_length as u16)?
-            },
+            }
             LengthPlacement::NextFourBytes => {
                 // 0x5A = byte string, length in the next four bytes
                 self.write_u8(0x5A)?;
                 self.write_u32(v_length as u32)?
-            },
+            }
             LengthPlacement::NextEightBytes => {
                 // 0x5B = byte string, length in the next eight bytes
                 self.write_u8(0x5B)?;
                 self.write_u64(v_length as u64)?
-            },
+            }
         }
         self.write_bytes(v)
     }
@@ -333,17 +331,17 @@ impl<'a, W: Write> Serializer for &'a mut Encoder<W> {
                 // 0x99 = array of data items, length in the next two bytes
                 self.write_u8(0x99)?;
                 self.write_u16(len as u16)?;
-            },
+            }
             LengthPlacement::NextFourBytes => {
                 // 0x9A = array of data items, length in the next four bytes
                 self.write_u8(0x9A)?;
                 self.write_u32(len as u32)?;
-            },
+            }
             LengthPlacement::NextEightBytes => {
                 // 0x9B = array of data items, length in the next eight bytes
                 self.write_u8(0x9B)?;
                 self.write_u64(len as u64)?;
-            },
+            }
         }
         Ok(ComplexEncoder {
             encoder: self,
@@ -381,21 +379,21 @@ impl<'a, W: Write> Serializer for &'a mut Encoder<W> {
                     LengthPlacement::AdditionalInformation => {
                         // 0xA0 = map major type
                         self.write_u8(0xA0 | length as u8)?
-                    },
+                    }
                     LengthPlacement::NextByte => {
                         // 0xB8 = map of pairs of data items, length in the next byte
                         self.write_bytes(&[0xB8, length as u8])?
-                    },
+                    }
                     LengthPlacement::NextTwoBytes => {
                         // 0xB9 = map of pairs of data items, length in the next two bytes
                         self.write_u8(0xB9)?;
                         self.write_u16(length as u16)?
-                    },
+                    }
                     LengthPlacement::NextFourBytes => {
                         // 0xBA = map of pairs of data items, length in the next four bytes
                         self.write_u8(0xBA)?;
                         self.write_u32(length as u32)?
-                    },
+                    }
                     LengthPlacement::NextEightBytes => {
                         // 0xBB = map of pairs of data items, length in the next eight bytes
                         self.write_u8(0xBB)?;
