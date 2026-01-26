@@ -1,7 +1,6 @@
 //! The CBOR encoder
 
 use crate::{
-    ARRAY_OF_ITEMS, BYTE_STRING, MAP_OF_ITEMS, NEGATIVE_INTEGER, TEXT_STRING, UNSIGNED_INTEGER,
     error::EncodeError,
 };
 use serde::ser::{
@@ -18,12 +17,12 @@ pub struct Encoder<W: Write> {
 }
 
 /// The complex encoder type
-pub struct ComplexEncoder<'a, W: Write> {
-    encoder: &'a mut Encoder<W>,
+pub struct ComplexEncoder<'encoder, W: Write> {
+    encoder: &'encoder mut Encoder<W>,
     indefinite_length: bool,
 }
 
-enum ArgumentPlacement {
+enum LengthPlacement {
     AdditionalInformation,
     NextByte,
     NextTwoBytes,
@@ -51,23 +50,38 @@ impl<W: Write> Encoder<W> {
         Ok(self.writer.flush()?)
     }
 
-    // When encoding a text or byte string, an array or a map the length must be
-    // encoded as the smallest form possible, this function does a chain of
-    // comparisons to tell the caller function where should the argument be placed
-    fn calculate_argument_placement(length: usize) -> Result<ArgumentPlacement, EncodeError> {
+    fn write_u8(&mut self, data: u8) -> Result<(), EncodeError> {
+        Ok(self.writer.write_all(&[data])?)
+    }
+
+    fn write_u16(&mut self, data: u16) -> Result<(), EncodeError> {
+        Ok(self.writer.write_all(&data.to_be_bytes())?)
+    }
+
+    fn write_u32(&mut self, data: u32) -> Result<(), EncodeError> {
+        Ok(self.writer.write_all(&data.to_be_bytes())?)
+    }
+
+    fn write_u64(&mut self, data: u64) -> Result<(), EncodeError> {
+        Ok(self.writer.write_all(&data.to_be_bytes())?)
+    }
+
+    fn write_bytes(&mut self, data: &[u8]) -> Result<(), EncodeError> {
+        Ok(self.writer.write_all(data)?)
+    }
+
+    fn calc_length_placement(length: usize) -> Result<LengthPlacement, EncodeError> {
         if length < 24 {
-            Ok(ArgumentPlacement::AdditionalInformation)
-        } else if length <= u8::MAX as usize {
-            Ok(ArgumentPlacement::NextByte)
-        } else if length <= u16::MAX as usize {
-            Ok(ArgumentPlacement::NextTwoBytes)
-        } else if length <= u32::MAX as usize {
-            Ok(ArgumentPlacement::NextFourBytes)
-        } else if length <= u64::MAX as usize {
-            Ok(ArgumentPlacement::NextEightBytes)
+            Ok(LengthPlacement::AdditionalInformation)
+        } else if length < u8::MAX as usize {
+            Ok(LengthPlacement::NextByte)
+        } else if length < u16::MAX as usize {
+            Ok(LengthPlacement::NextTwoBytes)
+        } else if length < u32::MAX as usize {
+            Ok(LengthPlacement::NextFourBytes)
+        } else if length < u64::MAX as usize {
+            Ok(LengthPlacement::NextEightBytes)
         } else {
-            // The CBOR RFC which this codec is based on does not allow lengths
-            // above 2^64 bytes, this block is here just for compliance with the RFC
             Err(EncodeError::LengthOutOfBounds)
         }
     }
@@ -87,19 +101,19 @@ impl<'a, W: Write> Serializer for &'a mut Encoder<W> {
 
     fn serialize_bool(self, v: bool) -> Result<Self::Ok, Self::Error> {
         // 0xF5 = true | 0xF4 = false
-        let byte: u8 = if v { 0xF5 } else { 0xF4 };
-
-        Ok(self.writer.write_all(&[byte])?)
+        let boolean = if v { 0xF5 } else { 0xF4 };
+        self.write_u8(boolean)
     }
 
     fn serialize_i8(self, v: i8) -> Result<Self::Ok, Self::Error> {
         if v < 0 {
-            let encoded_value: u8 = (-1 - v) as u8;
+            let encoded_value = (-1 - v) as u8;
             if encoded_value < 24 {
-                Ok(self.writer.write_all(&[NEGATIVE_INTEGER | encoded_value])?)
+                // 0x20 = negative integer major type
+                self.write_u8(0x20 | encoded_value)
             } else {
                 // 0x38 = negative integer in the next byte
-                Ok(self.writer.write_all(&[0x38, encoded_value])?)
+                self.write_bytes(&[0x38, encoded_value])
             }
         } else {
             self.serialize_u8(v as u8)
@@ -108,16 +122,10 @@ impl<'a, W: Write> Serializer for &'a mut Encoder<W> {
 
     fn serialize_i16(self, v: i16) -> Result<Self::Ok, Self::Error> {
         if v < 0 {
-            if v >= i8::MIN as i16 {
-                self.serialize_i8(v as i8)
-            } else {
-                let encoded_value: u16 = (-1 - v) as u16;
-                // 0x39 = negative integer in the next two bytes
-                self.writer.write_all(&[0x39])?;
-                self.writer.write_all(&encoded_value.to_be_bytes())?;
-
-                Ok(())
-            }
+            let encoded_value = (-1 - v) as u16;
+            // 0x39 = negative integer in the next two bytes
+            self.write_u8(0x39)?;
+            self.write_u16(encoded_value)
         } else {
             self.serialize_u16(v as u16)
         }
@@ -125,16 +133,10 @@ impl<'a, W: Write> Serializer for &'a mut Encoder<W> {
 
     fn serialize_i32(self, v: i32) -> Result<Self::Ok, Self::Error> {
         if v < 0 {
-            if v >= i16::MIN as i32 {
-                self.serialize_i16(v as i16)
-            } else {
-                let encoded_value: u32 = (-1 - v) as u32;
-                // 0x3A = negative integer in the next four bytes
-                self.writer.write_all(&[0x3A])?;
-                self.writer.write_all(&encoded_value.to_be_bytes())?;
-
-                Ok(())
-            }
+            let encoded_value = (-1 - v) as u32;
+            // 0x3A = negative integer in the next four bytes
+            self.write_u8(0x3A)?;
+            self.write_u32(encoded_value)
         } else {
             self.serialize_u32(v as u32)
         }
@@ -142,16 +144,10 @@ impl<'a, W: Write> Serializer for &'a mut Encoder<W> {
 
     fn serialize_i64(self, v: i64) -> Result<Self::Ok, Self::Error> {
         if v < 0 {
-            if v >= i32::MIN as i64 {
-                self.serialize_i32(v as i32)
-            } else {
-                let encoded_value: u64 = (-1 - v) as u64;
-                // 0x3B = negative integer in the next eight bytes
-                self.writer.write_all(&[0x3B])?;
-                self.writer.write_all(&encoded_value.to_be_bytes())?;
-
-                Ok(())
-            }
+            let encoded_value = (-1 - v) as u64;
+            // 0x3B = negative integer in the next eight bytes
+            self.write_u8(0x3B)?;
+            self.write_u64(encoded_value)
         } else {
             self.serialize_u64(v as u64)
         }
@@ -159,130 +155,105 @@ impl<'a, W: Write> Serializer for &'a mut Encoder<W> {
 
     fn serialize_u8(self, v: u8) -> Result<Self::Ok, Self::Error> {
         if v < 24 {
-            Ok(self.writer.write_all(&[UNSIGNED_INTEGER | v])?)
+            // 0x00 = unsigned integer major type
+            // Since ORing with 0x00 has no effect and v is guaranteed to be below 24 we directly write v
+            self.write_u8(v)
         } else {
             // 0x18 = unsigned integer in the next byte
-            Ok(self.writer.write_all(&[0x18, v])?)
+            self.write_bytes(&[0x18, v])
         }
     }
 
     fn serialize_u16(self, v: u16) -> Result<Self::Ok, Self::Error> {
-        if v <= u8::MAX as u16 {
-            self.serialize_u8(v as u8)
-        } else {
-            // 0x19 = unsigned integer in the next two bytes
-            self.writer.write_all(&[0x19])?;
-            self.writer.write_all(&v.to_be_bytes())?;
-
-            Ok(())
-        }
+        // 0x19 = unsigned integer in the next two bytes
+        self.write_u8(0x19)?;
+        self.write_u16(v)
     }
 
     fn serialize_u32(self, v: u32) -> Result<Self::Ok, Self::Error> {
-        if v <= u16::MAX as u32 {
-            self.serialize_u16(v as u16)
-        } else {
-            // 0x1A = unsigned integer in the next four bytes
-            self.writer.write_all(&[0x1A])?;
-            self.writer.write_all(&v.to_be_bytes())?;
-
-            Ok(())
-        }
+        // 0x1A = unsigned integer in the next four bytes
+        self.write_u8(0x1A)?;
+        self.write_u32(v)
     }
 
     fn serialize_u64(self, v: u64) -> Result<Self::Ok, Self::Error> {
-        if v <= u32::MAX as u64 {
-            self.serialize_u32(v as u32)
-        } else {
-            // 0x1B = unsigned integer in the next eight bytes
-            self.writer.write_all(&[0x1B])?;
-            self.writer.write_all(&v.to_be_bytes())?;
-
-            Ok(())
-        }
+        // 0x1B = unsigned integer in the next eight bytes
+        self.write_u8(0x1B)?;
+        self.write_u64(v)
     }
 
     fn serialize_f32(self, _v: f32) -> Result<Self::Ok, Self::Error> {
-        // TODO
-        todo!("Will be implemented in future versions")
+        todo!()
     }
 
     fn serialize_f64(self, _v: f64) -> Result<Self::Ok, Self::Error> {
-        // TODO
-        todo!("Will be implemented in future versions")
+        todo!()
     }
 
     fn serialize_char(self, v: char) -> Result<Self::Ok, Self::Error> {
-        let data_item_header: u8 = TEXT_STRING | (v.len_utf8() as u8);
-
+        // 0x60 = text string major type
+        let header = 0x60 | v.len_utf8() as u8;
         let mut buf: [u8; 4] = [0; 4];
         let utf8_bytes = v.encode_utf8(&mut buf).as_bytes();
-
-        self.writer.write_all(&[data_item_header])?;
-        self.writer.write_all(utf8_bytes)?;
-
-        Ok(())
+        self.write_u8(header)?;
+        self.write_bytes(utf8_bytes)
     }
 
     fn serialize_str(self, v: &str) -> Result<Self::Ok, Self::Error> {
         let v_length = v.len();
-        // 0x78 = text string, length in the next byte
-        // 0x79 = text string, length in the next two bytes
-        // 0x7A = text string, length in the next four bytes
-        // 0x7B = text string, length in the next eight bytes
-        match Encoder::<W>::calculate_argument_placement(v_length)? {
-            ArgumentPlacement::AdditionalInformation => {
-                self.writer.write_all(&[TEXT_STRING | (v_length as u8)])?
-            }
-            ArgumentPlacement::NextByte => self.writer.write_all(&[0x78, (v_length as u8)])?,
-            ArgumentPlacement::NextTwoBytes => {
-                self.writer.write_all(&[0x79])?;
-                self.writer.write_all(&(v_length as u16).to_be_bytes())?;
-            }
-            ArgumentPlacement::NextFourBytes => {
-                self.writer.write_all(&[0x7A])?;
-                self.writer.write_all(&(v_length as u32).to_be_bytes())?;
-            }
-            ArgumentPlacement::NextEightBytes => {
-                self.writer.write_all(&[0x7B])?;
-                self.writer.write_all(&(v_length as u64).to_be_bytes())?;
-            }
+        match Encoder::<W>::calc_length_placement(v_length)? {
+            // 0x60 = text string major type
+            LengthPlacement::AdditionalInformation => self.write_u8(0x60 | v_length as u8)?,
+            // 0x78 = text string, length in the next byte
+            LengthPlacement::NextByte => self.write_bytes(&[0x78, v_length as u8])?,
+            LengthPlacement::NextTwoBytes => {
+                // 0x79 = text string, length in the next two bytes
+                self.write_u8(0x79)?;
+                self.write_u16(v_length as u16)?
+            },
+            LengthPlacement::NextFourBytes => {
+                // 0x7A = text string, length in the next four bytes
+                self.write_u8(0x7A)?;
+                self.write_u32(v_length as u32)?
+            },
+            LengthPlacement::NextEightBytes => {
+                // 0x7B = text string, length in the next eight bytes
+                self.write_u8(0x7B)?;
+                self.write_u64(v_length as u64)?
+            },
         }
-        self.writer.write_all(v.as_bytes())?;
-        Ok(())
+        self.write_bytes(v.as_bytes())
     }
 
     fn serialize_bytes(self, v: &[u8]) -> Result<Self::Ok, Self::Error> {
         let v_length = v.len();
-        // 0x58 = byte string, length in the next byte
-        // 0x59 = byte string, length in the next two bytes
-        // 0x5A = byte string, length in the next four bytes
-        // 0x5B = byte string, length in the next eight bytes
-        match Encoder::<W>::calculate_argument_placement(v_length)? {
-            ArgumentPlacement::AdditionalInformation => {
-                self.writer.write_all(&[BYTE_STRING | (v_length as u8)])?
-            }
-            ArgumentPlacement::NextByte => self.writer.write_all(&[0x58, (v_length as u8)])?,
-            ArgumentPlacement::NextTwoBytes => {
-                self.writer.write_all(&[0x59])?;
-                self.writer.write_all(&(v_length as u16).to_be_bytes())?;
-            }
-            ArgumentPlacement::NextFourBytes => {
-                self.writer.write_all(&[0x5A])?;
-                self.writer.write_all(&(v_length as u32).to_be_bytes())?;
-            }
-            ArgumentPlacement::NextEightBytes => {
-                self.writer.write_all(&[0x5B])?;
-                self.writer.write_all(&(v_length as u64).to_be_bytes())?;
-            }
+        match Encoder::<W>::calc_length_placement(v_length)? {
+            // 0x40 = byte string major type
+            LengthPlacement::AdditionalInformation => self.write_u8(0x40 | v_length as u8)?,
+            // 0x58 = byte string, length in the next byte
+            LengthPlacement::NextByte => self.write_bytes(&[0x58, v_length as u8])?,
+            LengthPlacement::NextTwoBytes => {
+                // 0x59 = byte string, length in the next two bytes
+                self.write_u8(0x59)?;
+                self.write_u16(v_length as u16)?
+            },
+            LengthPlacement::NextFourBytes => {
+                // 0x5A = byte string, length in the next four bytes
+                self.write_u8(0x5A)?;
+                self.write_u32(v_length as u32)?
+            },
+            LengthPlacement::NextEightBytes => {
+                // 0x5B = byte string, length in the next eight bytes
+                self.write_u8(0x5B)?;
+                self.write_u64(v_length as u64)?
+            },
         }
-        self.writer.write_all(v)?;
-        Ok(())
+        self.write_bytes(v)
     }
 
     fn serialize_none(self) -> Result<Self::Ok, Self::Error> {
         // 0xF6 = null
-        Ok(self.writer.write_all(&[0xF6])?)
+        self.write_u8(0xF6)
     }
 
     fn serialize_some<T>(self, value: &T) -> Result<Self::Ok, Self::Error>
@@ -294,12 +265,12 @@ impl<'a, W: Write> Serializer for &'a mut Encoder<W> {
 
     fn serialize_unit(self) -> Result<Self::Ok, Self::Error> {
         // 0xF6 = null
-        Ok(self.writer.write_all(&[0xF6])?)
+        self.write_u8(0xF6)
     }
 
     fn serialize_unit_struct(self, _name: &'static str) -> Result<Self::Ok, Self::Error> {
         // 0xF6 = null
-        Ok(self.writer.write_all(&[0xF6])?)
+        self.write_u8(0xF6)
     }
 
     fn serialize_unit_variant(
@@ -335,8 +306,7 @@ impl<'a, W: Write> Serializer for &'a mut Encoder<W> {
         let mut tuple_encoder = self.serialize_tuple(2)?;
         SerializeTuple::serialize_element(&mut tuple_encoder, variant)?;
         SerializeTuple::serialize_element(&mut tuple_encoder, value)?;
-        SerializeTuple::end(tuple_encoder)?;
-        Ok(())
+        SerializeTuple::end(tuple_encoder)
     }
 
     fn serialize_seq(self, len: Option<usize>) -> Result<Self::SerializeSeq, Self::Error> {
@@ -344,7 +314,7 @@ impl<'a, W: Write> Serializer for &'a mut Encoder<W> {
             Some(length) => self.serialize_tuple(length),
             None => {
                 // 0x9F = array of data items, indefinite length
-                self.writer.write_all(&[0x9F])?;
+                self.write_u8(0x9F)?;
                 Ok(ComplexEncoder {
                     encoder: self,
                     indefinite_length: true,
@@ -354,27 +324,26 @@ impl<'a, W: Write> Serializer for &'a mut Encoder<W> {
     }
 
     fn serialize_tuple(self, len: usize) -> Result<Self::SerializeTuple, Self::Error> {
-        // 0x98 = array of data items, length in the next byte
-        // 0x99 = array of data items, length in the next two bytes
-        // 0x9A = array of data items, length in the next four bytes
-        // 0x9B = array of data items, length in the next eight bytes
-        match Encoder::<W>::calculate_argument_placement(len)? {
-            ArgumentPlacement::AdditionalInformation => {
-                self.writer.write_all(&[ARRAY_OF_ITEMS | (len as u8)])?
-            }
-            ArgumentPlacement::NextByte => self.writer.write_all(&[0x98, (len as u8)])?,
-            ArgumentPlacement::NextTwoBytes => {
-                self.writer.write_all(&[0x99])?;
-                self.writer.write_all(&(len as u16).to_be_bytes())?;
-            }
-            ArgumentPlacement::NextFourBytes => {
-                self.writer.write_all(&[0x9A])?;
-                self.writer.write_all(&(len as u32).to_be_bytes())?;
-            }
-            ArgumentPlacement::NextEightBytes => {
-                self.writer.write_all(&[0x9B])?;
-                self.writer.write_all(&(len as u64).to_be_bytes())?;
-            }
+        match Encoder::<W>::calc_length_placement(len)? {
+            // 0x80 = array of data items major type
+            LengthPlacement::AdditionalInformation => self.write_u8(0x80 | len as u8)?,
+            // 0x98 = array of data items, length in the next byte
+            LengthPlacement::NextByte => self.write_bytes(&[0x98, len as u8])?,
+            LengthPlacement::NextTwoBytes => {
+                // 0x99 = array of data items, length in the next two bytes
+                self.write_u8(0x99)?;
+                self.write_u16(len as u16)?;
+            },
+            LengthPlacement::NextFourBytes => {
+                // 0x9A = array of data items, length in the next four bytes
+                self.write_u8(0x9A)?;
+                self.write_u32(len as u32)?;
+            },
+            LengthPlacement::NextEightBytes => {
+                // 0x9B = array of data items, length in the next eight bytes
+                self.write_u8(0x9B)?;
+                self.write_u64(len as u64)?;
+            },
         }
         Ok(ComplexEncoder {
             encoder: self,
@@ -408,28 +377,29 @@ impl<'a, W: Write> Serializer for &'a mut Encoder<W> {
     fn serialize_map(self, len: Option<usize>) -> Result<Self::SerializeMap, Self::Error> {
         match len {
             Some(length) => {
-                // 0xB8 = map of pairs of data items, length in the next byte
-                // 0xB9 = map of pairs of data items, length in the next two bytes
-                // 0xBA = map of pairs of data items, length in the next four bytes
-                // 0xBB = map of pairs of data items, length in the next eight bytes
-                match Encoder::<W>::calculate_argument_placement(length)? {
-                    ArgumentPlacement::AdditionalInformation => {
-                        self.writer.write_all(&[MAP_OF_ITEMS | (length as u8)])?
-                    }
-                    ArgumentPlacement::NextByte => {
-                        self.writer.write_all(&[0xB8, (length as u8)])?
-                    }
-                    ArgumentPlacement::NextTwoBytes => {
-                        self.writer.write_all(&[0xB9])?;
-                        self.writer.write_all(&(length as u16).to_be_bytes())?;
-                    }
-                    ArgumentPlacement::NextFourBytes => {
-                        self.writer.write_all(&[0xBA])?;
-                        self.writer.write_all(&(length as u32).to_be_bytes())?;
-                    }
-                    ArgumentPlacement::NextEightBytes => {
-                        self.writer.write_all(&[0xBB])?;
-                        self.writer.write_all(&(length as u64).to_be_bytes())?;
+                match Encoder::<W>::calc_length_placement(length)? {
+                    LengthPlacement::AdditionalInformation => {
+                        // 0xA0 = map major type
+                        self.write_u8(0xA0 | length as u8)?
+                    },
+                    LengthPlacement::NextByte => {
+                        // 0xB8 = map of pairs of data items, length in the next byte
+                        self.write_bytes(&[0xB8, length as u8])?
+                    },
+                    LengthPlacement::NextTwoBytes => {
+                        // 0xB9 = map of pairs of data items, length in the next two bytes
+                        self.write_u8(0xB9)?;
+                        self.write_u16(length as u16)?
+                    },
+                    LengthPlacement::NextFourBytes => {
+                        // 0xBA = map of pairs of data items, length in the next four bytes
+                        self.write_u8(0xBA)?;
+                        self.write_u32(length as u32)?
+                    },
+                    LengthPlacement::NextEightBytes => {
+                        // 0xBB = map of pairs of data items, length in the next eight bytes
+                        self.write_u8(0xBB)?;
+                        self.write_u64(length as u64)?
                     }
                 }
                 Ok(ComplexEncoder {
@@ -439,7 +409,7 @@ impl<'a, W: Write> Serializer for &'a mut Encoder<W> {
             }
             None => {
                 // 0xBF = array of data items, indefinite length
-                self.writer.write_all(&[0xBF])?;
+                self.write_u8(0xBF)?;
                 Ok(ComplexEncoder {
                     encoder: self,
                     indefinite_length: true,
@@ -490,9 +460,10 @@ impl<'a, W: Write> SerializeSeq for ComplexEncoder<'a, W> {
     fn end(self) -> Result<Self::Ok, Self::Error> {
         // 0xFF = break byte
         if self.indefinite_length {
-            self.encoder.writer.write_all(&[0xFF])?;
+            self.encoder.write_u8(0xFF)
+        } else {
+            Ok(())
         }
-        Ok(())
     }
 }
 
@@ -565,9 +536,10 @@ impl<'a, W: Write> SerializeMap for ComplexEncoder<'a, W> {
     fn end(self) -> Result<Self::Ok, Self::Error> {
         // 0xFF = break byte
         if self.indefinite_length {
-            self.encoder.writer.write_all(&[0xFF])?;
+            self.encoder.write_u8(0xFF)
+        } else {
+            Ok(())
         }
-        Ok(())
     }
 }
 
