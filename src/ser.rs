@@ -85,17 +85,17 @@ impl<W: Write> Encoder<W> {
     }
 }
 
-impl<'a, W: Write> Serializer for &'a mut Encoder<W> {
+impl<'encoder, W: Write> Serializer for &'encoder mut Encoder<W> {
     type Ok = ();
     type Error = EncodeError;
 
-    type SerializeSeq = ComplexEncoder<'a, W>;
-    type SerializeTuple = ComplexEncoder<'a, W>;
-    type SerializeTupleStruct = ComplexEncoder<'a, W>;
-    type SerializeTupleVariant = ComplexEncoder<'a, W>;
-    type SerializeMap = ComplexEncoder<'a, W>;
-    type SerializeStruct = ComplexEncoder<'a, W>;
-    type SerializeStructVariant = ComplexEncoder<'a, W>;
+    type SerializeSeq = ComplexEncoder<'encoder, W>;
+    type SerializeTuple = ComplexEncoder<'encoder, W>;
+    type SerializeTupleStruct = ComplexEncoder<'encoder, W>;
+    type SerializeTupleVariant = ComplexEncoder<'encoder, W>;
+    type SerializeMap = ComplexEncoder<'encoder, W>;
+    type SerializeStruct = ComplexEncoder<'encoder, W>;
+    type SerializeStructVariant = ComplexEncoder<'encoder, W>;
 
     fn serialize_bool(self, v: bool) -> Result<Self::Ok, Self::Error> {
         // 0xF5 = true | 0xF4 = false
@@ -444,7 +444,7 @@ impl<'a, W: Write> Serializer for &'a mut Encoder<W> {
     }
 }
 
-impl<'a, W: Write> SerializeSeq for ComplexEncoder<'a, W> {
+impl<'encoder, W: Write> SerializeSeq for ComplexEncoder<'encoder, W> {
     type Ok = ();
     type Error = EncodeError;
 
@@ -465,7 +465,7 @@ impl<'a, W: Write> SerializeSeq for ComplexEncoder<'a, W> {
     }
 }
 
-impl<'a, W: Write> SerializeTuple for ComplexEncoder<'a, W> {
+impl<'encoder, W: Write> SerializeTuple for ComplexEncoder<'encoder, W> {
     type Ok = ();
     type Error = EncodeError;
 
@@ -481,7 +481,7 @@ impl<'a, W: Write> SerializeTuple for ComplexEncoder<'a, W> {
     }
 }
 
-impl<'a, W: Write> SerializeTupleStruct for ComplexEncoder<'a, W> {
+impl<'encoder, W: Write> SerializeTupleStruct for ComplexEncoder<'encoder, W> {
     type Ok = ();
     type Error = EncodeError;
 
@@ -497,7 +497,7 @@ impl<'a, W: Write> SerializeTupleStruct for ComplexEncoder<'a, W> {
     }
 }
 
-impl<'a, W: Write> SerializeTupleVariant for ComplexEncoder<'a, W> {
+impl<'encoder, W: Write> SerializeTupleVariant for ComplexEncoder<'encoder, W> {
     type Ok = ();
     type Error = EncodeError;
 
@@ -513,7 +513,7 @@ impl<'a, W: Write> SerializeTupleVariant for ComplexEncoder<'a, W> {
     }
 }
 
-impl<'a, W: Write> SerializeMap for ComplexEncoder<'a, W> {
+impl<'encoder, W: Write> SerializeMap for ComplexEncoder<'encoder, W> {
     type Ok = ();
     type Error = EncodeError;
 
@@ -541,7 +541,7 @@ impl<'a, W: Write> SerializeMap for ComplexEncoder<'a, W> {
     }
 }
 
-impl<'a, W: Write> SerializeStruct for ComplexEncoder<'a, W> {
+impl<'encoder, W: Write> SerializeStruct for ComplexEncoder<'encoder, W> {
     type Ok = ();
     type Error = EncodeError;
 
@@ -559,7 +559,7 @@ impl<'a, W: Write> SerializeStruct for ComplexEncoder<'a, W> {
     }
 }
 
-impl<'a, W: Write> SerializeStructVariant for ComplexEncoder<'a, W> {
+impl<'encoder, W: Write> SerializeStructVariant for ComplexEncoder<'encoder, W> {
     type Ok = ();
     type Error = EncodeError;
 
@@ -574,5 +574,73 @@ impl<'a, W: Write> SerializeStructVariant for ComplexEncoder<'a, W> {
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn serialize_bool() {
+        let mut buffer = Vec::new();
+        {
+            let mut encoder = Encoder::new(&mut buffer);
+            encoder.serialize_bool(true).unwrap();
+            encoder.serialize_bool(false).unwrap();
+            encoder.flush().unwrap();
+        }
+        assert_eq!(buffer, Vec::from([0xF5, 0xF4]))
+    }
+
+    #[test]
+    fn serialize_i8() {
+        let mut buffer = Vec::new();
+        let input_data = Vec::from([-24, -23, -1, 0, 1, 10, 23, 24, -25, 127, -128]);
+        let expected_cbor = Vec::from([
+            0x37,       // -24
+            0x36,       // -23
+            0x20,       // -1
+            0x00,       // 0
+            0x01,       // 1
+            0x0A,       // 10
+            0x17,       // 23
+            0x18, 0x18, // 24
+            0x38, 0x18, // -25
+            0x18, 0x7F, // 127
+            0x38, 0x7F  // -128
+        ]);
+        {
+            let mut encoder = Encoder::new(&mut buffer);
+            for single_input in input_data {
+                encoder.serialize_i8(single_input).unwrap();
+            }
+            encoder.flush().unwrap();
+        }
+        assert_eq!(buffer, expected_cbor)
+    }
+
+    #[test]
+    fn serialize_u8() {
+        let mut buffer = Vec::new();
+        let input_data: Vec<u8> = Vec::from([0, 1, 10, 23, 24, 42, 127, 255]);
+        let expected_cbor = Vec::from([
+            0x00,       // 0
+            0x01,       // 1
+            0x0A,       // 10
+            0x17,       // 23
+            0x18, 0x18, // 24
+            0x18, 0x2A, // 42
+            0x18, 0x7F, // 127
+            0x18, 0xFF  // 255
+        ]);
+        {
+            let mut encoder = Encoder::new(&mut buffer);
+            for single_input in input_data {
+                encoder.serialize_u8(single_input).unwrap();
+            }
+            encoder.flush().unwrap();
+        }
+        assert_eq!(buffer, expected_cbor);
     }
 }
